@@ -173,3 +173,138 @@ func test_jump_buffer() -> void:
 
 func test_jump_buffer_expires() -> void:
 	check(not await buffered_jump_fired(0.25), "space 0.25 s before landing is ignored")
+
+
+func count_dashes() -> Array:
+	var dashes := [0]
+	p.dash_started.connect(func(_direction): dashes[0] += 1)
+	return dashes
+
+
+## Jumps, releases Space, and waits until clearly airborne.
+func get_airborne() -> void:
+	await hold(0.05, NONE, true)
+	await hold(0.05, NONE)
+
+
+func test_aim_table() -> void:
+	var f := Vector3.FORWARD
+	var diagonal := sqrt(0.5)
+	check(p.dash_direction(f, false, false).is_equal_approx(f), "flat")
+	check(p.dash_direction(f, true, false).is_equal_approx(Vector3(0, diagonal, -diagonal)), "up diagonal")
+	check(p.dash_direction(f, false, true).is_equal_approx(Vector3(0, -diagonal, -diagonal)), "down diagonal")
+	check(p.dash_direction(Vector3.ZERO, true, false).is_equal_approx(Vector3.UP), "straight up")
+	check(p.dash_direction(Vector3.ZERO, false, true).is_equal_approx(Vector3.DOWN), "straight down")
+	check(p.dash_direction(f, true, true).is_equal_approx(f), "both cancel")
+	check(p.dash_direction(Vector3.ZERO, false, false).is_equal_approx(p.facing), "nothing uses facing")
+
+
+func test_standstill_dash_goes_along_facing() -> void: # Review Focus 5
+	await hold(0.05, NONE, false, true)
+	check(p.velocity.is_finite(), "finite velocity")
+	check(p.velocity.dot(p.facing) > 15.0, "dashes along facing, got %s" % p.velocity)
+
+
+func test_one_air_dash_per_airtime() -> void:
+	await respawn(Vector3(0, 12, 0))
+	var dashes := count_dashes()
+	await hold(0.05, FORWARD, false, true)
+	await hold(0.25, FORWARD)
+	await hold(0.05, FORWARD, false, true)
+	check(dashes[0] == 1, "dashed %d times" % dashes[0])
+
+
+func test_landing_refills_air_dash() -> void:
+	await get_airborne()
+	await hold(0.05, FORWARD, false, true)
+	check(not p.dash_available, "air dash spent")
+	await hold(0.3, NONE)
+	await land()
+	await hold(0.02, NONE)
+	check(p.dash_available, "refilled on landing")
+
+
+func test_held_shift_does_not_extend_air_dash() -> void:
+	await get_airborne()
+	await hold(0.2, FORWARD, false, true)
+	check(p.state != p.State.DASH, "burst ended with Shift held")
+
+
+func test_space_held_aims_air_dash_up() -> void:
+	await hold(0.08, NONE, true)
+	await hold(0.04, FORWARD, true, true)
+	check(p.velocity.y > 12.0, "aims up, got %f" % p.velocity.y)
+
+
+func test_space_mid_dash_reaims_up() -> void:
+	await get_airborne()
+	await hold(0.03, FORWARD, false, true)
+	check(p.velocity.y < 1.0, "starts flat, got %f" % p.velocity.y)
+	await hold(0.02, FORWARD, true, true)
+	check(p.velocity.y > 12.0, "re-aimed up, got %f" % p.velocity.y)
+
+
+func test_landing_with_shift_enters_dash_run_at_carried_speed() -> void:
+	await respawn(Vector3(0, 1.5, 0))
+	p.velocity = Vector3(0, 0, -30)
+	await hold(0.2, FORWARD, false, true)
+	await land()
+	await hold(0.02, FORWARD, false, true)
+	check(p.state == p.State.DASH_RUN, "in dash-run, state %d" % p.state)
+	check(p.horizontal_speed() > 20.0, "kept speed, got %f" % p.horizontal_speed())
+
+
+func test_dash_run_sustains_while_held() -> void:
+	await hold(1.0, FORWARD, false, true)
+	check(p.state == p.State.DASH_RUN, "still dash-running")
+	check(absf(p.horizontal_speed() - 13.3) < 0.1, "at 13.3, got %f" % p.horizontal_speed())
+
+
+func test_releasing_shift_leaves_dash_run() -> void:
+	await hold(0.5, FORWARD, false, true)
+	await hold(1.0, FORWARD)
+	check(p.state == p.State.NORMAL, "normal movement")
+	check(absf(p.horizontal_speed() - 7.5) < 0.1, "back to run speed, got %f" % p.horizontal_speed())
+
+
+func test_ground_burst_needs_fresh_shift() -> void:
+	var dashes := count_dashes()
+	await hold(0.4, FORWARD, false, true)
+	await hold(0.1, NONE, false, true)
+	await hold(0.2, FORWARD, false, true)
+	check(dashes[0] == 1, "one burst, got %d" % dashes[0])
+	check(p.state == p.State.DASH_RUN, "resumed dash-run")
+
+
+func test_dash_cooldown_blocks_retrigger() -> void:
+	var dashes := count_dashes()
+	await hold(0.05, FORWARD, false, true)
+	await hold(0.02, FORWARD)
+	await hold(0.02, FORWARD, false, true)
+	await hold(0.08, FORWARD)
+	check(dashes[0] == 1, "blocked during cooldown, got %d" % dashes[0])
+	await hold(0.2, FORWARD)
+	await hold(0.02, FORWARD, false, true)
+	check(dashes[0] == 2, "allowed after cooldown, got %d" % dashes[0])
+
+
+func test_ground_shift_space_consumes_air_dash() -> void:
+	await hold(0.04, FORWARD, true, true)
+	check(not p.dash_available, "air dash consumed")
+	check(p.velocity.y > 12.0, "launched up, got %f" % p.velocity.y)
+
+
+func test_dash_into_wall_stops_cleanly() -> void: # Review Focus 1
+	var wall := add_box(Vector3(0, 5, -2), Vector3(20, 10, 1))
+	await hold(0.1, FORWARD, false, true)
+	check(p.horizontal_speed() < 1.0, "stopped by wall, got %f" % p.horizontal_speed())
+	wall.queue_free()
+	await hold(0.1, NONE)
+	check(p.horizontal_speed() < 1.0, "old speed not restored, got %f" % p.horizontal_speed())
+
+
+func test_ceiling_cancels_up_dash() -> void: # Review Focus 2
+	add_box(Vector3(0, 3.5, 0), Vector3(20, 1, 20))
+	await hold(0.12, NONE, true, true)
+	check(p.state != p.State.DASH, "dash ended at ceiling")
+	check(p.velocity.y <= 0.0, "falling, got %f" % p.velocity.y)

@@ -10,6 +10,8 @@ enum State { NORMAL, DASH, DASH_RUN, SLIDE }
 
 const COYOTE_TIME := 0.1
 const JUMP_BUFFER_TIME := 0.1
+const DASH_BUFFER_TIME := 0.08
+const DASH_COOLDOWN := 0.2
 
 @export_group("Run")
 @export var max_run := 7.5
@@ -70,6 +72,20 @@ var _coyote := 0.0
 var _jump_buffer := 0.0
 var _var_jump := 0.0
 var _var_jump_speed := 0.0
+var _dash_buffer := 0.0
+var _dash_cooldown := 0.0
+var _dash_timer := 0.0
+var _dash_dir := Vector3.FORWARD
+var _dash_keep := 0.0
+
+
+## Unit dash direction: WASD horizontal, Space up, Ctrl down, both cancel.
+func dash_direction(move_world: Vector3, up: bool, down: bool) -> Vector3:
+	var horizontal := move_world.normalized()
+	var vertical := float(up) - float(down)
+	if horizontal == Vector3.ZERO and vertical == 0.0:
+		return facing
+	return (horizontal + Vector3.UP * vertical).normalized()
 
 
 func set_scripted_input(move: Vector2, jump: bool, dash: bool, squat: bool) -> void:
@@ -88,14 +104,29 @@ func _physics_process(delta: float) -> void:
 	_sample_input()
 	_coyote = maxf(_coyote - delta, 0.0)
 	_jump_buffer = maxf(_jump_buffer - delta, 0.0)
+	_dash_buffer = maxf(_dash_buffer - delta, 0.0)
+	_dash_cooldown = maxf(_dash_cooldown - delta, 0.0)
 	if _jump_pressed:
 		_jump_buffer = JUMP_BUFFER_TIME
+	if _dash_pressed:
+		_dash_buffer = DASH_BUFFER_TIME
 
 	var was_on_floor := is_on_floor()
 	if was_on_floor:
 		_coyote = COYOTE_TIME
+		if state != State.DASH:
+			dash_available = true
 
-	_update_normal(delta)
+	if _dash_buffer > 0.0 and _dash_cooldown <= 0.0 and (was_on_floor or dash_available):
+		_start_dash()
+
+	match state:
+		State.DASH:
+			_update_dash(delta)
+		State.DASH_RUN:
+			_update_dash_run(delta)
+		_:
+			_update_normal(delta)
 
 	var fall_speed := -velocity.y
 	move_and_slide()
@@ -127,10 +158,97 @@ func _sample_input() -> void:
 
 
 func _update_normal(delta: float) -> void:
+	if is_on_floor() and _dash_down and _move != Vector3.ZERO:
+		state = State.DASH_RUN
+		_update_dash_run(delta)
+		return
 	if _jump_buffer > 0.0 and _coyote > 0.0:
 		_jump()
 	_apply_run(delta)
 	_apply_gravity(delta)
+
+
+func _start_dash() -> void:
+	var grounded := is_on_floor()
+	var direction := dash_direction(_move, _jump_down, _squat_down)
+	if grounded and direction.y < 0.0:
+		direction = Vector3(direction.x, 0.0, direction.z).normalized()
+		if direction == Vector3.ZERO:
+			direction = facing
+	if not grounded or direction.y > 0.0:
+		dash_available = false
+		_coyote = 0.0
+		_jump_buffer = 0.0
+
+	var horizontal := Vector3(velocity.x, 0.0, velocity.z)
+	var flat_direction := Vector3(direction.x, 0.0, direction.z).normalized()
+	_dash_keep = maxf(horizontal.dot(flat_direction), 0.0)
+	velocity = direction * dash_speed
+	if _dash_keep > Vector2(velocity.x, velocity.z).length():
+		velocity.x = flat_direction.x * _dash_keep
+		velocity.z = flat_direction.z * _dash_keep
+
+	_dash_dir = direction
+	_dash_timer = dash_time
+	_dash_buffer = 0.0
+	_dash_cooldown = DASH_COOLDOWN
+	_var_jump = 0.0
+	state = State.DASH
+	dash_started.emit(direction)
+
+
+func _update_dash(delta: float) -> void:
+	_dash_timer -= delta
+	if _jump_pressed and not _squat_down and not is_on_floor():
+		var flat_direction := Vector3(_dash_dir.x, 0.0, _dash_dir.z)
+		_dash_dir = dash_direction(flat_direction, true, false)
+		velocity = _dash_dir * velocity.length()
+		_jump_buffer = 0.0
+	var hit_wall := is_on_wall() and get_wall_normal().dot(_dash_dir) < -0.5
+	var hit_ceiling := is_on_ceiling() and _dash_dir.y > 0.0
+	if _dash_timer <= 0.0 or hit_wall or hit_ceiling:
+		_end_dash()
+
+
+func _end_dash() -> void:
+	var horizontal := Vector3(velocity.x, 0.0, velocity.z)
+	horizontal = horizontal.limit_length(maxf(dash_run_speed, _dash_keep))
+	velocity.x = horizontal.x
+	velocity.z = horizontal.z
+	if _dash_dir.y > 0.0:
+		velocity.y = minf(velocity.y, _dash_dir.y * dash_run_speed * end_dash_up_mult)
+	state = State.NORMAL
+
+
+func _update_dash_run(delta: float) -> void:
+	if not is_on_floor() or not _dash_down or _move == Vector3.ZERO:
+		state = State.NORMAL
+		_update_normal(delta)
+		return
+	if _jump_buffer > 0.0 and _coyote > 0.0:
+		state = State.NORMAL
+		_jump()
+		_apply_gravity(delta)
+		return
+	var horizontal := _steer(Vector3(velocity.x, 0.0, velocity.z), delta)
+	var speed := horizontal.length()
+	var rate := run_reduce if speed > dash_run_speed else run_accel
+	speed = move_toward(speed, dash_run_speed, rate * delta)
+	horizontal = horizontal.normalized() * speed
+	velocity.x = horizontal.x
+	velocity.z = horizontal.z
+	_apply_gravity(delta)
+
+
+## Rotates a horizontal velocity toward the move input without changing speed.
+func _steer(horizontal: Vector3, delta: float) -> Vector3:
+	if _move == Vector3.ZERO:
+		return horizontal
+	if horizontal.length_squared() < 0.0001:
+		return _move.normalized() * 0.01
+	var angle := horizontal.signed_angle_to(_move, Vector3.UP)
+	var step := deg_to_rad(air_turn_rate) * delta
+	return horizontal.rotated(Vector3.UP, clampf(angle, -step, step))
 
 
 func _apply_run(delta: float) -> void:

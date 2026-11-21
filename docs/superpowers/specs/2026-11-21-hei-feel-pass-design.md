@@ -98,6 +98,18 @@ burst, velocity is `base + direction * dash_speed`.
 
 Supers and hypers keep their existing formulas, using the new ceiling.
 
+### Route balance (user decided at the Stage 1 play check)
+
+This section overrides the 35 m/s plain-dash limit and the 21 m/s² air pull-back
+stated elsewhere in this document. Harder routes now pay off:
+
+- A dash adds only up to the current launch's limit: `dash_limit` 28 m/s on the
+  ground and after a plain jump or super, `hyper_dash_limit` 42 after a hyper, and
+  `wave_dash_limit` 50 after a hyper out of a wavedash. Landing resets it to 28.
+  Speed already above the limit is kept, as before.
+- A hyper out of a wavedash launches `wave_hyper_mult` (1.2) times faster.
+- Air speed above `soft_speed` drains at `air_pull` (8 m/s²).
+
 ### Speed limits (user decided)
 
 - `soft_speed` is 35 m/s. Above it, horizontal speed is pulled back at

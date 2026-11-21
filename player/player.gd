@@ -16,6 +16,7 @@ enum State { NORMAL, DASH, DASH_RUN, SLIDE }
 @export var soft_speed := 35.0
 @export var max_speed := 60.0
 @export var air_drag := 1.0
+@export var air_pull := 8.0
 @export var ground_bleed := 10.8
 
 @export_group("Gravity")
@@ -38,12 +39,16 @@ enum State { NORMAL, DASH, DASH_RUN, SLIDE }
 @export var dash_run_speed := 13.3
 @export var dash_time := 0.15
 @export var max_rise := 18.0
+@export var dash_limit := 28.0
+@export var hyper_dash_limit := 42.0
+@export var wave_dash_limit := 50.0
 @export var hit_freeze_time := 0.05
 
 @export_group("Super")
 @export var super_jump_h := 21.7
 @export var hyper_h_mult := 1.25
 @export var hyper_v_mult := 0.5
+@export var wave_hyper_mult := 1.2
 @export var slide_mult := 1.2
 @export var duck_friction := 80.0
 
@@ -93,6 +98,8 @@ var _dash_timer := 0.0
 var _dash_dir := Vector3.FORWARD
 var _dash_base := Vector3.ZERO
 var _ground_dash_ready := true
+var _dash_limit := 28.0
+var _wave_slide := false
 var _dash_grounded := false
 var _coyote_kind := &"jump"
 var _wave_window := 0.0
@@ -130,6 +137,7 @@ func horizontal_speed() -> float:
 
 func _ready() -> void:
 	_spawn_point = global_position
+	_dash_limit = dash_limit
 
 
 func _return_to_spawn() -> void:
@@ -147,6 +155,8 @@ func _return_to_spawn() -> void:
 	_wave_jump = false
 	_freeze = 0.0
 	_ground_dash_ready = true
+	_dash_limit = dash_limit
+	_wave_slide = false
 	reset_physics_interpolation()
 
 
@@ -223,6 +233,7 @@ func _physics_process(delta: float) -> void:
 	if is_on_ceiling():
 		_var_jump = 0.0
 	if is_on_floor() and not was_on_floor:
+		_dash_limit = dash_limit
 		landed.emit(fall_speed)
 	if global_position.y < kill_y:
 		_return_to_spawn()
@@ -273,14 +284,14 @@ func _apply_air(delta: float) -> void:
 	if is_air_braking:
 		horizontal = horizontal.move_toward(Vector3.ZERO, air_brake_decel * delta)
 	elif _move == Vector3.ZERO:
-		horizontal = horizontal.normalized() * _decay(speed, 0.0, air_drag, run_reduce * air_mult, delta)
+		horizontal = horizontal.normalized() * _decay(speed, 0.0, air_drag, air_pull, delta)
 	elif speed <= max_run:
 		horizontal = horizontal.move_toward(_move * max_run, run_accel * air_mult * delta)
 	elif horizontal.normalized().dot(_move.normalized()) < -0.5:
 		horizontal = horizontal.move_toward(_move * max_run, run_accel * air_mult * delta)
 	else:
 		horizontal = _steer(horizontal, delta)
-		horizontal = horizontal.normalized() * _decay(speed, max_run, air_drag, run_reduce * air_mult, delta)
+		horizontal = horizontal.normalized() * _decay(speed, max_run, air_drag, air_pull, delta)
 	velocity.x = horizontal.x
 	velocity.z = horizontal.z
 
@@ -296,6 +307,7 @@ func _start_dash() -> void:
 	var grounded := is_on_floor()
 	var direction := dash_direction(_move, _jump_down, _squat_down)
 	var flat_direction := Vector3(direction.x, 0.0, direction.z).normalized()
+	_wave_slide = false
 	_dash_base = velocity
 	if grounded:
 		_dash_base.y = 0.0
@@ -331,7 +343,7 @@ func _start_dash() -> void:
 	dash_started.emit(direction)
 
 
-## Stored velocity plus the dash. Plain dashes never add past soft_speed.
+## Stored velocity plus the dash, adding only up to the current launch's limit.
 func _dash_velocity(direction: Vector3, amount: float, full_add: bool) -> Vector3:
 	var base := _dash_base
 	if base.y * direction.y < 0.0:
@@ -342,7 +354,8 @@ func _dash_velocity(direction: Vector3, amount: float, full_add: bool) -> Vector
 	if not full_add:
 		var unit := flat.normalized()
 		added = unit * maxf(amount - carried.dot(unit), 0.0)
-	var horizontal := (carried + added).limit_length(maxf(soft_speed, carried.length()))
+	var limit := dash_limit if is_on_floor() else _dash_limit
+	var horizontal := (carried + added).limit_length(maxf(limit, carried.length()))
 	var rise := base.y + direction.y * amount
 	if direction.y > 0.0:
 		rise = minf(rise, maxf(max_rise, base.y))
@@ -359,11 +372,13 @@ func _land_wavedash() -> void:
 			state = State.NORMAL
 			if _wave_jump:
 				_wave_jump = false
+				_wave_slide = true
 				_launch(&"hyper")
 			return
 		horizontal += _move.normalized() * dash_speed * sqrt(0.5)
 	velocity = horizontal * slide_mult
 	_enter_slide(true)
+	_wave_slide = true
 	if _wave_jump:
 		_wave_jump = false
 		_launch(&"hyper")
@@ -371,6 +386,7 @@ func _land_wavedash() -> void:
 
 func _enter_slide(can_hyper: bool) -> void:
 	state = State.SLIDE
+	_wave_slide = false
 	_can_hyper = can_hyper
 	_hyper_rest = hyper_rest_grace
 
@@ -384,6 +400,7 @@ func _update_slide(delta: float) -> void:
 		return
 	if not _squat_down or not is_on_floor():
 		state = State.NORMAL
+		_wave_slide = false
 		_update_normal(delta)
 		return
 	var horizontal := _steer(Vector3(velocity.x, 0.0, velocity.z), delta)
@@ -416,6 +433,11 @@ func _try_jump() -> bool:
 
 
 func _launch(kind: StringName) -> void:
+	var from_wave := kind == &"hyper" and _wave_slide
+	_wave_slide = false
+	_dash_limit = dash_limit
+	if kind == &"hyper":
+		_dash_limit = wave_dash_limit if from_wave else hyper_dash_limit
 	state = State.NORMAL
 	if kind == &"jump":
 		_jump()
@@ -429,7 +451,7 @@ func _launch(kind: StringName) -> void:
 	var speed := maxf(horizontal.length(), super_jump_h)
 	var rise := jump_speed
 	if kind == &"hyper":
-		speed *= hyper_h_mult
+		speed *= hyper_h_mult * (wave_hyper_mult if from_wave else 1.0)
 		rise *= hyper_v_mult
 	speed = minf(speed, max_speed)
 	if is_on_floor():

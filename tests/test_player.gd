@@ -753,13 +753,13 @@ func test_forgiveness_timers_are_tunable() -> void:
 func test_soft_limit_pulls_back_without_input() -> void:
 	await fly(50.0)
 	await hold(0.5, NONE)
-	check(absf(p.horizontal_speed() - 39.3) < 0.4, "pulled back, got %f" % p.horizontal_speed())
+	check(absf(p.horizontal_speed() - 46.0) < 0.4, "gentle pull-back, got %f" % p.horizontal_speed())
 
 
 func test_soft_limit_pulls_back_with_wasd() -> void:
 	await fly(50.0)
 	await hold(0.5, FORWARD)
-	check(absf(p.horizontal_speed() - 39.3) < 0.4, "pulled back, got %f" % p.horizontal_speed())
+	check(absf(p.horizontal_speed() - 46.0) < 0.4, "gentle pull-back, got %f" % p.horizontal_speed())
 
 
 func test_max_speed_is_a_hard_ceiling() -> void:
@@ -819,10 +819,10 @@ func test_fov_uses_soft_speed() -> void:
 
 
 func test_sideways_dash_keeps_forward_speed() -> void:
-	await fly(25.0)
+	await fly(15.0)
 	await hold(0.07, Vector2(1, 0), false, true)
 	check(absf(p.velocity.x - 20.0) < 0.5, "adds sideways, got %s" % p.velocity)
-	check(absf(p.velocity.z + 25.0) < 0.5, "keeps forward, got %s" % p.velocity)
+	check(absf(p.velocity.z + 15.0) < 0.5, "keeps forward, got %s" % p.velocity)
 
 
 func test_backward_dash_subtracts() -> void:
@@ -870,16 +870,16 @@ func test_flat_dash_keeps_vertical_speed() -> void:
 
 
 func test_dash_speed_survives_the_burst() -> void:
-	await fly(10.0)
+	await fly(5.0)
 	await hold(0.25, FORWARD, false, true)
 	check(p.state != p.State.DASH, "burst over")
-	check(p.horizontal_speed() > 29.0, "no end trim, got %f" % p.horizontal_speed())
+	check(p.horizontal_speed() > 24.0, "no end trim, got %f" % p.horizontal_speed())
 
 
-func test_plain_dash_stops_adding_at_soft_limit() -> void:
-	await fly(30.0)
+func test_plain_dash_stops_adding_at_dash_limit() -> void:
+	await fly(20.0)
 	await hold(0.07, FORWARD, false, true)
-	check(absf(p.horizontal_speed() - 35.0) < 0.1, "got %f" % p.horizontal_speed())
+	check(absf(p.horizontal_speed() - 28.0) < 0.1, "got %f" % p.horizontal_speed())
 
 
 func test_dash_above_soft_limit_bends_and_keeps_speed() -> void:
@@ -907,7 +907,7 @@ func test_mashing_ground_dash_does_not_build_speed() -> void:
 	check(fastest <= 20.1, "mash stays at dash speed, got %f" % fastest)
 
 
-func test_dash_and_hop_loop_stays_at_soft_limit() -> void:
+func test_dash_and_hop_loop_stays_at_dash_limit() -> void:
 	var fastest := 0.0
 	for hop in 6:
 		await hold(0.08, FORWARD, false, true)
@@ -922,14 +922,14 @@ func test_dash_and_hop_loop_stays_at_soft_limit() -> void:
 			fastest = maxf(fastest, p.horizontal_speed())
 			if i > 2 and p.is_on_floor():
 				break
-	check(fastest > 30.0, "loop is fast, got %f" % fastest)
-	check(fastest <= 35.001, "loop stays at 35, got %f" % fastest)
+	check(fastest > 25.0, "loop is fast, got %f" % fastest)
+	check(fastest <= 28.001, "loop stays at 28, got %f" % fastest)
 
 
 func test_low_slide_multiplies_only_added_speed() -> void:
-	p.velocity = Vector3(0, 0, -5)
+	p.velocity = Vector3(0, 0, -3)
 	await hold(0.02, FORWARD, false, true, true)
-	check(absf(p.horizontal_speed() - 29.0) < 0.5, "5 + 20 * 1.2, got %f" % p.horizontal_speed())
+	check(absf(p.horizontal_speed() - 27.0) < 0.5, "3 + 20 * 1.2, got %f" % p.horizontal_speed())
 
 
 func test_straight_down_wavedash_adds_to_carried_speed() -> void:
@@ -953,3 +953,56 @@ func test_fast_hyper_up_ramp_is_not_rise_limited() -> void: # Review Focus 3
 	check(p.velocity.y > 18.0, "launch keeps slope rise, got %f" % p.velocity.y)
 	await hold(0.05, FORWARD, true, true, true)
 	check(not p.is_on_floor(), "left the ramp")
+
+
+## From a fresh launch, holds Space, then does an up-forward dash.
+func dash_after_launch() -> float:
+	await hold(0.2, FORWARD, true)
+	await hold(0.1, FORWARD, true, true)
+	return p.horizontal_speed()
+
+
+func test_super_dash_reaches_plain_limit() -> void:
+	await hold(0.08, FORWARD, false, true)
+	await hold(0.02, FORWARD, true, true)
+	var speed: float = await dash_after_launch()
+	check(absf(speed - 28.0) < 0.2, "super route stops at 28, got %f" % speed)
+
+
+func test_hyper_dash_reaches_hyper_limit() -> void:
+	await hold(0.08, FORWARD, false, true, true)
+	await hold(0.02, FORWARD, true, true, true)
+	var speed: float = await dash_after_launch()
+	check(absf(speed - 42.0) < 0.5, "hyper route reaches 42, got %f" % speed)
+
+
+func test_wavedash_hyper_launches_faster() -> void:
+	await wavedash()
+	await hold(0.02, FORWARD, true, false, true)
+	check(absf(p.horizontal_speed() - 32.55) < 0.5, "20%% wave bonus, got %f" % p.horizontal_speed())
+
+
+func test_wavedash_hyper_dash_passes_hyper_limit() -> void:
+	await wavedash()
+	await hold(0.02, FORWARD, true, false, true)
+	var speed: float = await dash_after_launch()
+	check(absf(speed - 46.5) < 0.7, "wave route reaches 46.5, got %f" % speed)
+
+
+func test_wave_bonus_ends_with_the_slide() -> void:
+	await wavedash()
+	await hold(2.0, NONE)
+	check(p.horizontal_speed() < 0.01, "stopped first, got %f" % p.horizontal_speed())
+	await hold(0.12, FORWARD, false, true, true)
+	await hold(0.02, FORWARD, true, true, true)
+	check(absf(p.horizontal_speed() - 27.125) < 0.5, "plain hyper, got %f" % p.horizontal_speed())
+
+
+func test_landing_resets_dash_limit() -> void:
+	await hold(0.08, FORWARD, false, true, true)
+	await hold(0.02, FORWARD, true, true, true)
+	check(p._dash_limit == p.hyper_dash_limit, "hyper limit in flight, got %f" % p._dash_limit)
+	await hold(0.05, FORWARD)
+	await land()
+	await hold(0.01, FORWARD)
+	check(p._dash_limit == p.dash_limit, "plain limit after landing, got %f" % p._dash_limit)

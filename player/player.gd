@@ -65,6 +65,12 @@ enum State { NORMAL, DASH, DASH_RUN, SLIDE }
 @export var wavedash_grace := 0.1
 @export var hyper_rest_grace := 0.15
 
+@export_group("Wall Kick")
+@export var wall_kick_speed := 10.8
+@export var wall_kick_reach := 0.25
+@export var wall_kick_lock := 0.16
+@export var wall_retain_time := 0.15
+
 @export_group("Level")
 @export var kill_y := -30.0
 
@@ -100,6 +106,10 @@ var _dash_base := Vector3.ZERO
 var _ground_dash_ready := true
 var _dash_limit := 28.0
 var _wave_slide := false
+var _wall_normal := Vector3.ZERO
+var _wall_impact := 0.0
+var _wall_retain := 0.0
+var _wall_lock := 0.0
 var _dash_grounded := false
 var _coyote_kind := &"jump"
 var _wave_window := 0.0
@@ -157,6 +167,9 @@ func _return_to_spawn() -> void:
 	_ground_dash_ready = true
 	_dash_limit = dash_limit
 	_wave_slide = false
+	_wall_impact = 0.0
+	_wall_retain = 0.0
+	_wall_lock = 0.0
 	reset_physics_interpolation()
 
 
@@ -180,6 +193,8 @@ func _physics_process(delta: float) -> void:
 	_jump_buffer = maxf(_jump_buffer - delta, 0.0)
 	_dash_buffer = maxf(_dash_buffer - delta, 0.0)
 	_dash_cooldown = maxf(_dash_cooldown - delta, 0.0)
+	_wall_retain = maxf(_wall_retain - delta, 0.0)
+	_wall_lock = maxf(_wall_lock - delta, 0.0)
 	if _jump_pressed:
 		_jump_buffer = jump_buffer_time
 	if _dash_pressed:
@@ -212,15 +227,19 @@ func _physics_process(delta: float) -> void:
 		_brake_armed = true
 	is_air_braking = _brake_armed and state != State.DASH
 
-	match state:
-		State.DASH:
-			_update_dash(delta)
-		State.DASH_RUN:
-			_update_dash_run(delta)
-		State.SLIDE:
-			_update_slide(delta)
-		_:
-			_update_normal(delta)
+	# Space during a squatting down-dash is saved for the hyper on landing.
+	var holds_hyper := _wave_window > 0.0 and _squat_down
+	var kicked := not was_on_floor and not holds_hyper and _try_wall_kick()
+	if not kicked:
+		match state:
+			State.DASH:
+				_update_dash(delta)
+			State.DASH_RUN:
+				_update_dash_run(delta)
+			State.SLIDE:
+				_update_slide(delta)
+			_:
+				_update_normal(delta)
 
 	if was_on_floor and _coyote > 0.0:
 		_coyote_kind = _ground_jump_kind()
@@ -229,7 +248,9 @@ func _physics_process(delta: float) -> void:
 	velocity.z = capped.y
 
 	var fall_speed := -velocity.y
+	var before_move := velocity
 	move_and_slide()
+	_record_wall_impact(before_move)
 	if is_on_ceiling():
 		_var_jump = 0.0
 	if is_on_floor() and not was_on_floor:
@@ -237,6 +258,67 @@ func _physics_process(delta: float) -> void:
 		landed.emit(fall_speed)
 	if global_position.y < kill_y:
 		_return_to_spawn()
+
+
+## Remembers how hard Hei hit a wall, because move_and_slide removes that speed.
+func _record_wall_impact(before: Vector3) -> void:
+	if not is_on_wall():
+		return
+	var wall_normal := get_wall_normal()
+	var normal := Vector3(wall_normal.x, 0.0, wall_normal.z).normalized()
+	var into := -Vector3(before.x, 0.0, before.z).dot(normal)
+	if into > 0.01 and (_wall_retain <= 0.0 or into > _wall_impact):
+		_wall_normal = normal
+		_wall_impact = into
+		_wall_retain = wall_retain_time
+
+
+## Flat normal of the nearest wall within reach, or zero.
+func _find_wall() -> Vector3:
+	var best := Vector3.ZERO
+	var best_travel := INF
+	var hit := KinematicCollision3D.new()
+	for i in 8:
+		var direction := Vector3.FORWARD.rotated(Vector3.UP, i * TAU / 8.0)
+		if not test_move(global_transform, direction * wall_kick_reach, hit, safe_margin, true, 4):
+			continue
+		var travel := hit.get_travel().length()
+		for c in hit.get_collision_count():
+			var normal := hit.get_normal(c)
+			if absf(normal.y) < cos(floor_max_angle) and travel < best_travel:
+				best_travel = travel
+				best = Vector3(normal.x, 0.0, normal.z).normalized()
+	return best
+
+
+## Rebounds off a nearby wall with the speed Hei hit it at.
+func _try_wall_kick() -> bool:
+	if _jump_buffer <= 0.0 or _coyote > 0.0 or is_on_floor():
+		return false
+	var normal := _find_wall()
+	if normal == Vector3.ZERO:
+		return false
+	var impact := _wall_impact if _wall_retain > 0.0 and normal.dot(_wall_normal) > 0.7 else 0.0
+	var horizontal := Vector3(velocity.x, 0.0, velocity.z)
+	var away := horizontal.dot(normal)
+	var out := horizontal - normal * away + normal * maxf(maxf(impact, wall_kick_speed), away)
+	velocity.x = out.x
+	velocity.z = out.z
+	var rise := lerpf(tight_jump_speed, jump_speed, _hang())
+	velocity.y = maxf(velocity.y, rise)
+	state = State.NORMAL
+	dash_available = true
+	is_air_braking = false
+	_brake_armed = false
+	_jump_buffer = 0.0
+	_wave_window = 0.0
+	_wave_jump = false
+	_wall_retain = 0.0
+	_wall_lock = wall_kick_lock
+	_var_jump = var_jump_time
+	_var_jump_speed = rise
+	jumped.emit(&"wall")
+	return true
 
 
 func _sample_input() -> void:
@@ -283,7 +365,7 @@ func _apply_air(delta: float) -> void:
 	var speed := horizontal.length()
 	if is_air_braking:
 		horizontal = horizontal.move_toward(Vector3.ZERO, air_brake_decel * delta)
-	elif _move == Vector3.ZERO:
+	elif _move == Vector3.ZERO or _wall_lock > 0.0:
 		horizontal = horizontal.normalized() * _decay(speed, 0.0, air_drag, air_pull, delta)
 	elif speed <= max_run:
 		horizontal = horizontal.move_toward(_move * max_run, run_accel * air_mult * delta)

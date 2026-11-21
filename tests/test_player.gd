@@ -1006,3 +1006,130 @@ func test_landing_resets_dash_limit() -> void:
 	await land()
 	await hold(0.01, FORWARD)
 	check(p._dash_limit == p.dash_limit, "plain limit after landing, got %f" % p._dash_limit)
+
+
+## Flies Hei with no input into a wall ahead, stopping on first contact.
+func hit_wall(speed: float, side := 0.0) -> StaticBody3D:
+	var wall := add_box(Vector3(0, 60, -4), Vector3(60, 80, 1))
+	await respawn(Vector3(0, 60, 0))
+	p.velocity = Vector3(side, 0, -speed)
+	p.set_scripted_input(NONE, false, false, false)
+	for i in 240:
+		await physics_frame
+		if p.is_on_wall():
+			break
+	return wall
+
+
+func test_wall_kick_rebounds_with_impact_speed() -> void:
+	await hit_wall(30.0)
+	var kinds := record_jumps()
+	await hold(0.02, NONE, true)
+	check(kinds == [&"wall"], "kicked, got %s" % [kinds])
+	check(absf(p.velocity.z - 30.0) < 1.0, "rebounds at 30, got %s" % p.velocity)
+	check(p.velocity.y >= 11.5, "rises, got %f" % p.velocity.y)
+
+
+func test_slow_touch_uses_kick_speed() -> void:
+	await hit_wall(4.0)
+	await hold(0.02, NONE, true)
+	check(absf(p.velocity.z - 10.8) < 0.5, "base kick, got %s" % p.velocity)
+
+
+func test_kick_carries_speed_along_wall() -> void:
+	await hit_wall(20.0, 12.0)
+	await hold(0.02, NONE, true)
+	check(absf(p.velocity.x - 12.0) < 1.0, "keeps along-wall speed, got %s" % p.velocity)
+	check(absf(p.velocity.z - 20.0) < 1.0, "rebounds, got %s" % p.velocity)
+
+
+func test_kick_refills_air_dash() -> void:
+	await hit_wall(20.0)
+	p.dash_available = false
+	await hold(0.02, NONE, true)
+	check(p.dash_available, "refilled")
+
+
+func test_holding_toward_wall_does_not_cancel_rebound() -> void:
+	await hit_wall(20.0)
+	await hold(0.02, FORWARD, true)
+	await hold(0.12, FORWARD)
+	check(p.velocity.z > 15.0, "still rebounding, got %s" % p.velocity)
+
+
+func test_same_wall_can_be_kicked_repeatedly() -> void:
+	await hit_wall(15.0)
+	var kinds := record_jumps()
+	for kick in 3:
+		await hold(0.02, NONE, true)
+		await hold(0.1, FORWARD)
+		for i in 360:
+			if p.is_on_wall():
+				break
+			await physics_frame
+	check(kinds.size() == 3, "three kicks, got %d" % kinds.size())
+
+
+func test_alternating_walls_work() -> void:
+	add_box(Vector3(0, 60, 4), Vector3(60, 80, 1))
+	await hit_wall(20.0)
+	var kinds := record_jumps()
+	await hold(0.02, NONE, true)
+	await hold(0.05, NONE)
+	for i in 120:
+		if p.is_on_wall():
+			break
+		await physics_frame
+	await hold(0.02, NONE, true)
+	check(kinds.size() == 2, "two kicks, got %d" % kinds.size())
+	check(p.velocity.z < -15.0, "rebounds off second wall, got %s" % p.velocity)
+
+
+func test_floor_jump_beats_wall_kick() -> void:
+	add_box(Vector3(0, 5, -1), Vector3(20, 10, 1))
+	var kinds := record_jumps()
+	await hold(0.02, NONE, true)
+	check(kinds == [&"jump"], "floor jump, got %s" % [kinds])
+
+
+func test_kick_beats_dash_reaim() -> void:
+	add_box(Vector3(0, 60, -1), Vector3(60, 80, 1))
+	await respawn(Vector3(0, 60, 0))
+	var kinds := record_jumps()
+	await hold(0.03, Vector2(1, 0), false, true)
+	await hold(0.04, Vector2(1, 0), true, true)
+	check(kinds == [&"wall"], "kicked mid-dash, got %s" % [kinds])
+	check(p.state != p.State.DASH, "dash ended")
+	check(p.velocity.z > 5.0, "away from wall, got %s" % p.velocity)
+
+
+func test_down_dash_with_squat_near_wall_keeps_hyper() -> void:
+	add_box(Vector3(0, 5, -1), Vector3(40, 10, 1))
+	await respawn(Vector3(0, 1.8, 0))
+	var kinds := record_jumps()
+	var side := Vector2(1, 0)
+	await hold(0.02, side, false, true, true)
+	await hold(0.03, side, true, true, true)
+	p.set_scripted_input(side, true, false, true)
+	await land()
+	await hold(0.02, side, true, false, true)
+	check(kinds == [&"hyper"], "hyper on landing, got %s" % [kinds])
+
+
+func test_no_kick_after_wall_is_gone() -> void: # Review Focus 4
+	var wall: StaticBody3D = await hit_wall(30.0)
+	var kinds := record_jumps()
+	wall.queue_free()
+	await hold(0.02, NONE)
+	await hold(0.02, NONE, true)
+	check(kinds.is_empty(), "no wall, no kick, got %s" % [kinds])
+	check(p.velocity.z < 5.0, "no stored rebound, got %s" % p.velocity)
+
+
+func test_return_to_spawn_clears_wall_state() -> void: # Review Focus 5
+	await hit_wall(30.0)
+	await hold(0.02, NONE, true)
+	p.position = Vector3(0, -100, 0)
+	await hold(0.01, NONE)
+	check(p._wall_lock == 0.0, "lock cleared, got %f" % p._wall_lock)
+	check(p._wall_retain == 0.0, "impact cleared, got %f" % p._wall_retain)

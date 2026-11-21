@@ -56,7 +56,7 @@ func spawn(at: Vector3) -> void:
 func respawn(at: Vector3) -> void:
 	p.queue_free()
 	spawn(at)
-	await hold(0.02, NONE)
+	await hold(0.05, NONE) # a spawn near the floor settles before the test acts
 
 
 func add_box(center: Vector3, size: Vector3, rotation_x := 0.0) -> StaticBody3D:
@@ -308,3 +308,172 @@ func test_ceiling_cancels_up_dash() -> void: # Review Focus 2
 	await hold(0.12, NONE, true, true)
 	check(p.state != p.State.DASH, "dash ended at ceiling")
 	check(p.velocity.y <= 0.0, "falling, got %f" % p.velocity.y)
+
+
+func record_jumps() -> Array:
+	var kinds := []
+	p.jumped.connect(func(kind): kinds.append(kind))
+	return kinds
+
+
+## Launches from a ground dash and returns the height reached.
+func launch_peak(squat: bool) -> float:
+	await hold(0.08, FORWARD, false, true, squat)
+	var start: float = p.position.y
+	var peak := start
+	p.set_scripted_input(FORWARD, true, true, squat)
+	for i in 120:
+		await physics_frame
+		peak = maxf(peak, p.position.y)
+	return peak - start
+
+
+## Down-dashes from a height, keeps Ctrl, returns the jump kind Space gives on the floor.
+func landing_jump_kind(height: float) -> StringName:
+	await respawn(Vector3(0, height, 0))
+	var kinds := record_jumps()
+	await hold(0.03, FORWARD, false, true, true)
+	p.set_scripted_input(FORWARD, false, false, true)
+	await land()
+	await hold(0.02, FORWARD, false, false, true)
+	await hold(0.02, FORWARD, true, false, true)
+	return kinds[0] if not kinds.is_empty() else &"none"
+
+
+func wavedash() -> void:
+	await respawn(Vector3(0, 1.8, 0))
+	await hold(0.03, FORWARD, false, true, true)
+	p.set_scripted_input(FORWARD, false, false, true)
+	await land()
+	await hold(0.01, FORWARD, false, false, true)
+
+
+func test_super_exceeds_dash_run() -> void:
+	var kinds := record_jumps()
+	await hold(0.3, FORWARD, false, true)
+	await hold(0.02, FORWARD, true, true)
+	check(kinds == [&"super"], "super fired, got %s" % [kinds])
+	check(absf(p.horizontal_speed() - 21.7) < 0.5, "at 21.7, got %f" % p.horizontal_speed())
+
+
+func test_hyper_faster_than_super() -> void:
+	var kinds := record_jumps()
+	await hold(0.08, FORWARD, false, true, true)
+	await hold(0.02, FORWARD, true, true, true)
+	check(kinds == [&"hyper"], "hyper fired, got %s" % [kinds])
+	check(absf(p.horizontal_speed() - 27.125) < 0.5, "at 27.1, got %f" % p.horizontal_speed())
+
+
+func test_hyper_lower_than_super() -> void:
+	var super_peak: float = await launch_peak(false)
+	await respawn(Vector3(0, 0.02, 0))
+	var hyper_peak: float = await launch_peak(true)
+	check(hyper_peak < super_peak - 0.3, "hyper %f vs super %f" % [hyper_peak, super_peak])
+
+
+func test_wavedash_refills_dash() -> void:
+	await wavedash()
+	check(p.state == p.State.SLIDE, "sliding, state %d" % p.state)
+	check(p.dash_available, "dash refilled")
+	check(p.horizontal_speed() > 15.0, "slide speed, got %f" % p.horizontal_speed())
+
+
+func test_wavedash_grace_window() -> void:
+	var near: StringName = await landing_jump_kind(3.0)
+	check(near == &"hyper", "landing just after burst, got %s" % near)
+	var far: StringName = await landing_jump_kind(7.0)
+	check(far == &"jump", "landing long after burst, got %s" % far)
+
+
+func test_early_space_in_down_dash_fires_hyper() -> void:
+	await respawn(Vector3(0, 1.8, 0))
+	var kinds := record_jumps()
+	await hold(0.02, FORWARD, false, true, true)
+	await hold(0.03, FORWARD, true, true, true)
+	check(p.velocity.y < 0.0 or not kinds.is_empty(), "Space did not re-aim up")
+	p.set_scripted_input(FORWARD, true, false, true)
+	await land()
+	await hold(0.02, FORWARD, true, false, true)
+	check(kinds == [&"hyper"], "hyper on landing, got %s" % [kinds])
+
+
+func test_straight_down_dash_without_wasd_is_plain_landing() -> void:
+	await respawn(Vector3(0, 1.8, 0))
+	await hold(0.03, NONE, false, true, true)
+	p.set_scripted_input(NONE, false, false, false)
+	await land()
+	await hold(0.02, NONE)
+	check(p.state == p.State.NORMAL, "normal landing, state %d" % p.state)
+	check(p.dash_available, "dash refilled")
+
+
+func test_slide_stops_quickly() -> void:
+	await wavedash()
+	await hold(0.4, NONE, false, false, true)
+	check(p.horizontal_speed() < 0.1, "stopped, got %f" % p.horizontal_speed())
+
+
+func test_hyper_from_nearly_stopped_slide_is_full_power() -> void:
+	await wavedash()
+	await hold(0.18, NONE, false, false, true)
+	check(p.horizontal_speed() < 5.0, "nearly stopped, got %f" % p.horizontal_speed())
+	await hold(0.02, FORWARD, true, false, true)
+	check(p.horizontal_speed() > 26.5, "full hyper, got %f" % p.horizontal_speed())
+
+
+func test_plain_squat_never_hypers() -> void:
+	var kinds := record_jumps()
+	await hold(0.2, FORWARD, false, false, true)
+	await hold(0.02, FORWARD, true, false, true)
+	check(kinds == [&"jump"], "plain jump, got %s" % [kinds])
+	check(p.horizontal_speed() < 8.0, "no boost, got %f" % p.horizontal_speed())
+
+
+func test_rested_slide_loses_hyper() -> void:
+	await wavedash()
+	var kinds := record_jumps()
+	await hold(1.0, NONE, false, false, true)
+	await hold(0.02, NONE, true, false, true)
+	check(kinds == [&"jump"], "plain jump after resting, got %s" % [kinds])
+
+
+func test_chained_speed_never_exceeds_max() -> void:
+	var fastest := 0.0
+	await hold(0.08, FORWARD, false, true, true)
+	for chain in 12: # tap Space just before each landing so it buffers into the next hyper
+		await hold(0.02, FORWARD, true, true, true)
+		p.set_scripted_input(FORWARD, false, true, true)
+		for i in 240:
+			await physics_frame
+			fastest = maxf(fastest, p.horizontal_speed())
+			if p.velocity.y < 0.0 and p.position.y < 0.3:
+				break
+	check(fastest > 30.0, "chain builds speed, got %f" % fastest)
+	check(fastest <= 35.001, "capped at 35, got %f" % fastest)
+
+
+func test_coyote_super_off_ledge() -> void: # Review Focus 3
+	add_box(Vector3(0, 4, 0), Vector3(10, 2, 10))
+	await respawn(Vector3(0, 5.02, 4))
+	var kinds := record_jumps()
+	p.set_scripted_input(FORWARD, false, true, false)
+	for i in 240:
+		await physics_frame
+		if not p.is_on_floor():
+			break
+	await hold(0.03, FORWARD, false, true)
+	await hold(0.02, FORWARD, true, true)
+	check(kinds == [&"super"], "super after ledge, got %s" % [kinds])
+	check(p.dash_available, "air dash still available")
+
+
+func test_wavedash_on_slope_keeps_speed() -> void: # Review Focus 4
+	add_box(Vector3(0, 5, 0), Vector3(80, 1, 80), deg_to_rad(20.0))
+	await respawn(Vector3(0, 8, 0))
+	await hold(0.03, FORWARD, false, true, true)
+	p.set_scripted_input(FORWARD, false, false, true)
+	await land()
+	await hold(0.02, FORWARD, false, false, true)
+	check(p.state == p.State.SLIDE, "slides on slope, state %d" % p.state)
+	check(p.is_on_floor(), "stays on slope")
+	check(p.horizontal_speed() > 10.0, "keeps speed, got %f" % p.horizontal_speed())

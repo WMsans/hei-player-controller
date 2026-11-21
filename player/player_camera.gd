@@ -42,6 +42,6 @@ func apply_look(motion: InputEventMouseMotion) -> void:
 func _process(delta: float) -> void:
 	global_position = _player.get_global_transform_interpolated().origin + Vector3.UP * height
 	rotation = Vector3(_pitch, _player.view_yaw, 0.0)
-	var speed_ratio := clampf(_player.horizontal_speed() / _player.max_speed, 0.0, 1.0)
+	var speed_ratio := clampf(_player.horizontal_speed() / _player.soft_speed, 0.0, 1.0)
 	var target_fov := lerpf(base_fov, fast_fov, speed_ratio)
 	_camera.fov = lerpf(_camera.fov, target_fov, 1.0 - exp(-fov_response * delta))

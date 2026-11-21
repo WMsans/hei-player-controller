@@ -467,8 +467,8 @@ func test_chained_speed_never_exceeds_max() -> void:
 			fastest = maxf(fastest, p.horizontal_speed())
 			if p.velocity.y < 0.0 and p.position.y < 0.3:
 				break
-	check(fastest > 27.0, "chain builds speed, got %f" % fastest)
-	check(fastest <= 35.001, "capped at 35, got %f" % fastest)
+	check(fastest > 35.0, "chain passes the soft limit, got %f" % fastest)
+	check(fastest <= 60.001, "capped at 60, got %f" % fastest)
 
 
 func test_coyote_super_off_ledge() -> void: # Review Focus 3
@@ -723,3 +723,71 @@ func test_forgiveness_timers_are_tunable() -> void:
 			exported.append(property.name)
 	for name in ["coyote_time", "jump_buffer_time", "dash_buffer_time", "dash_cooldown", "wavedash_grace", "hyper_rest_grace"]:
 		check(name in exported, "%s is exported" % name)
+
+
+func test_soft_limit_pulls_back_without_input() -> void:
+	await fly(50.0)
+	await hold(0.5, NONE)
+	check(absf(p.horizontal_speed() - 39.3) < 0.4, "pulled back, got %f" % p.horizontal_speed())
+
+
+func test_soft_limit_pulls_back_with_wasd() -> void:
+	await fly(50.0)
+	await hold(0.5, FORWARD)
+	check(absf(p.horizontal_speed() - 39.3) < 0.4, "pulled back, got %f" % p.horizontal_speed())
+
+
+func test_max_speed_is_a_hard_ceiling() -> void:
+	await fly(80.0)
+	await hold(0.01, NONE)
+	check(p.horizontal_speed() <= 60.001, "ceiling, got %f" % p.horizontal_speed())
+
+
+func test_ceiling_speed_does_not_tunnel_thin_wall() -> void: # Review Focus 2
+	add_box(Vector3(0, 60, -6), Vector3(40, 40, 0.2))
+	await respawn(Vector3(0, 60, 0))
+	p.velocity = Vector3(0, 0, -60)
+	await hold(0.3, FORWARD)
+	check(p.position.z > -6.0, "stopped by wall, z %f" % p.position.z)
+
+
+func test_air_speed_barely_drops_without_input() -> void:
+	await fly(20.0)
+	await hold(1.0, NONE)
+	check(absf(p.horizontal_speed() - 19.0) < 0.15, "coasts, got %f" % p.horizontal_speed())
+
+
+func test_ground_bleed_takes_about_two_seconds() -> void:
+	p.velocity = Vector3(0, 0, -35)
+	await hold(2.0, FORWARD)
+	check(absf(p.horizontal_speed() - 13.4) < 0.4, "slow bleed, got %f" % p.horizontal_speed())
+
+
+func test_no_wasd_landing_coasts() -> void:
+	await respawn(Vector3(0, 1.5, 0))
+	p.velocity = Vector3(0, 0, -30)
+	await hold(0.05, NONE)
+	await land()
+	await hold(0.2, NONE)
+	check(p.horizontal_speed() > 26.0, "coasts on landing, got %f" % p.horizontal_speed())
+
+
+func test_hopping_does_not_build_speed() -> void:
+	await hold(0.5, FORWARD)
+	var fastest := 0.0
+	for hop in 8:
+		await hold(0.02, FORWARD, true)
+		p.set_scripted_input(FORWARD, false, false, false)
+		for i in 240:
+			await physics_frame
+			fastest = maxf(fastest, p.horizontal_speed())
+			if i > 4 and p.is_on_floor():
+				break
+	check(fastest <= 10.81, "hop limit, got %f" % fastest)
+
+
+func test_fov_uses_soft_speed() -> void:
+	await fly(35.0)
+	await hold(0.5, NONE)
+	var camera: Camera3D = p.get_node("CameraRig/SpringArm3D/Camera3D")
+	check(camera.fov > 93.0, "full FOV at soft speed, got %f" % camera.fov)

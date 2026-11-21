@@ -13,7 +13,10 @@ enum State { NORMAL, DASH, DASH_RUN, SLIDE }
 @export var run_accel := 83.0
 @export var run_reduce := 33.0
 @export var air_mult := 0.65
-@export var max_speed := 35.0
+@export var soft_speed := 35.0
+@export var max_speed := 60.0
+@export var air_drag := 1.0
+@export var ground_bleed := 10.8
 
 @export_group("Gravity")
 @export var gravity := 36.0
@@ -261,15 +264,24 @@ func _apply_air(delta: float) -> void:
 	var speed := horizontal.length()
 	if is_air_braking:
 		horizontal = horizontal.move_toward(Vector3.ZERO, air_brake_decel * delta)
+	elif _move == Vector3.ZERO:
+		horizontal = horizontal.normalized() * _decay(speed, 0.0, air_drag, run_reduce * air_mult, delta)
 	elif speed <= max_run:
 		horizontal = horizontal.move_toward(_move * max_run, run_accel * air_mult * delta)
-	elif _move != Vector3.ZERO and horizontal.normalized().dot(_move.normalized()) < -0.5:
+	elif horizontal.normalized().dot(_move.normalized()) < -0.5:
 		horizontal = horizontal.move_toward(_move * max_run, run_accel * air_mult * delta)
 	else:
 		horizontal = _steer(horizontal, delta)
-		horizontal = horizontal.normalized() * move_toward(speed, max_run, run_reduce * air_mult * delta)
+		horizontal = horizontal.normalized() * _decay(speed, max_run, air_drag, run_reduce * air_mult, delta)
 	velocity.x = horizontal.x
 	velocity.z = horizontal.z
+
+
+## Moves speed toward target: pull_rate above soft_speed, slow_rate below it.
+func _decay(speed: float, target: float, slow_rate: float, pull_rate: float, delta: float) -> float:
+	if speed > soft_speed:
+		return maxf(speed - pull_rate * delta, maxf(soft_speed, target))
+	return move_toward(speed, target, slow_rate * delta)
 
 
 func _start_dash() -> void:
@@ -454,8 +466,10 @@ func _update_dash_run(delta: float) -> void:
 		return
 	var horizontal := _steer(Vector3(velocity.x, 0.0, velocity.z), delta)
 	var speed := horizontal.length()
-	var rate := run_reduce if speed > dash_run_speed else run_accel
-	speed = move_toward(speed, dash_run_speed, rate * delta)
+	if speed > dash_run_speed:
+		speed = _decay(speed, dash_run_speed, ground_bleed, run_reduce, delta)
+	else:
+		speed = move_toward(speed, dash_run_speed, run_accel * delta)
 	horizontal = horizontal.normalized() * speed
 	velocity.x = horizontal.x
 	velocity.z = horizontal.z
@@ -475,10 +489,13 @@ func _steer(horizontal: Vector3, delta: float) -> Vector3:
 
 func _apply_run(delta: float) -> void:
 	var horizontal := Vector3(velocity.x, 0.0, velocity.z)
-	var target := _move * max_run
-	var over_max := horizontal.length() > max_run and horizontal.dot(target) > 0.0
-	var rate := run_reduce if over_max else run_accel
-	horizontal = horizontal.move_toward(target, rate * delta)
+	var speed := horizontal.length()
+	var opposed := _move != Vector3.ZERO and horizontal.normalized().dot(_move.normalized()) < -0.5
+	if speed <= max_run or opposed:
+		horizontal = horizontal.move_toward(_move * max_run, run_accel * delta)
+	else:
+		horizontal = _steer(horizontal, delta)
+		horizontal = horizontal.normalized() * _decay(speed, max_run, ground_bleed, run_reduce, delta)
 	velocity.x = horizontal.x
 	velocity.z = horizontal.z
 
@@ -506,6 +523,7 @@ func _jump() -> void:
 	_coyote = 0.0
 	_var_jump = var_jump_time
 	_var_jump_speed = jump_speed
-	velocity += _move * jump_h_boost
-	velocity.y = jump_speed
+	var carried := Vector3(velocity.x, 0.0, velocity.z)
+	var boosted := (carried + _move * jump_h_boost).limit_length(maxf(carried.length(), max_run + jump_h_boost))
+	velocity = Vector3(boosted.x, jump_speed, boosted.z)
 	jumped.emit(&"jump")

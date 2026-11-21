@@ -1128,11 +1128,81 @@ func test_no_kick_after_wall_is_gone() -> void: # Review Focus 4
 
 func test_return_to_spawn_clears_wall_state() -> void: # Review Focus 5
 	await hit_wall(30.0)
+	check(p._wall_retain > 0.0, "impact recorded first")
+	p.position = Vector3(0, -100, 0)
+	await hold(0.01, NONE)
+	check(p._wall_retain == 0.0, "retain cleared, got %f" % p._wall_retain)
+	check(p._wall_impact == 0.0, "impact cleared, got %f" % p._wall_impact)
+
+
+func test_return_to_spawn_clears_kick_lock() -> void: # Review Focus 5
+	await hit_wall(30.0)
 	await hold(0.02, NONE, true)
+	check(p._wall_lock > 0.0, "lock active first")
 	p.position = Vector3(0, -100, 0)
 	await hold(0.01, NONE)
 	check(p._wall_lock == 0.0, "lock cleared, got %f" % p._wall_lock)
-	check(p._wall_retain == 0.0, "impact cleared, got %f" % p._wall_retain)
+
+
+func test_early_space_keeps_approach_speed() -> void:
+	add_box(Vector3(0, 60, -4), Vector3(60, 80, 1))
+	await respawn(Vector3(0, 60, 0))
+	var kinds := record_jumps()
+	p.velocity = Vector3(0, 0, -30)
+	p.set_scripted_input(NONE, false, false, false)
+	for i in 120:
+		await physics_frame
+		if p.position.z <= -1.6:
+			break
+	await hold(0.08, NONE, true)
+	check(kinds == [&"wall"], "kicked, got %s" % [kinds])
+	check(p.velocity.z > 28.0, "keeps approach speed, got %s" % p.velocity)
+
+
+func test_second_wall_records_its_own_impact() -> void:
+	add_box(Vector3(0, 60, -4), Vector3(60, 80, 1))
+	add_box(Vector3(4, 60, 0), Vector3(1, 80, 60))
+	await respawn(Vector3(0, 60, 0))
+	p.velocity = Vector3(20, 0, -30)
+	p.set_scripted_input(NONE, false, false, false)
+	for i in 120:
+		await physics_frame
+		if p.position.x > 3.0 and p.is_on_wall():
+			break
+	await hold(0.02, NONE, true)
+	check(p.velocity.x < -18.0, "rebounds off second wall at 20, got %s" % p.velocity)
+
+
+func test_coyote_hyper_off_wavedash_keeps_bonus() -> void:
+	add_box(Vector3(0, 4, 0), Vector3(10, 2, 10))
+	await respawn(Vector3(0, 6.8, -2.8))
+	await hold(0.03, FORWARD, false, true, true)
+	p.set_scripted_input(FORWARD, false, false, true)
+	await land()
+	for i in 120:
+		await physics_frame
+		if not p.is_on_floor():
+			break
+	check(not p.is_on_floor(), "slid off the ledge")
+	await hold(3.0 / 120.0, FORWARD, false, false, true)
+	await hold(0.01, FORWARD, true, false, true)
+	check(absf(p.horizontal_speed() - 32.55) < 1.0, "wave bonus kept, got %f" % p.horizontal_speed())
+	check(p._dash_limit == p.wave_dash_limit, "wave limit kept, got %f" % p._dash_limit)
+
+
+func test_buffered_dash_does_not_swallow_wave_hyper() -> void:
+	await respawn(Vector3(0, 4.2, 0))
+	var kinds := record_jumps()
+	await hold(0.03, FORWARD, false, true, true)
+	p.set_scripted_input(FORWARD, false, false, true)
+	for i in 240:
+		await physics_frame
+		if p.position.y <= 0.55:
+			break
+	await hold(0.06, FORWARD, true, true, true)
+	check(kinds == [&"hyper"], "hyper fired, got %s" % [kinds])
+	check(not p.is_on_floor(), "left the ground")
+	check(p.velocity.y > 1.0, "launch keeps its rise, got %f" % p.velocity.y)
 
 
 func test_level_has_wall_kick_course() -> void:

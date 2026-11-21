@@ -106,6 +106,7 @@ var _dash_base := Vector3.ZERO
 var _ground_dash_ready := true
 var _dash_limit := 28.0
 var _wave_slide := false
+var _coyote_wave := false
 var _wall_normal := Vector3.ZERO
 var _wall_impact := 0.0
 var _wall_retain := 0.0
@@ -167,6 +168,7 @@ func _return_to_spawn() -> void:
 	_ground_dash_ready = true
 	_dash_limit = dash_limit
 	_wave_slide = false
+	_coyote_wave = false
 	_wall_impact = 0.0
 	_wall_retain = 0.0
 	_wall_lock = 0.0
@@ -206,16 +208,17 @@ func _physics_process(delta: float) -> void:
 		_wave_jump = true
 
 	var was_on_floor := is_on_floor()
+	var wave_launched := false
 	if not was_on_floor:
 		_ground_dash_ready = true
 	if was_on_floor:
 		_coyote = coyote_time
 		if _wave_window > 0.0:
-			_land_wavedash()
+			wave_launched = _land_wavedash()
 		if state != State.DASH:
 			dash_available = true
 
-	if _dash_buffer > 0.0 and _dash_cooldown <= 0.0 and (was_on_floor or dash_available):
+	if _dash_buffer > 0.0 and _dash_cooldown <= 0.0 and (was_on_floor or dash_available) and not wave_launched:
 		_start_dash()
 		if _freeze > 0.0:
 			return
@@ -243,6 +246,7 @@ func _physics_process(delta: float) -> void:
 
 	if was_on_floor and _coyote > 0.0:
 		_coyote_kind = _ground_jump_kind()
+		_coyote_wave = _wave_slide
 	var capped := Vector2(velocity.x, velocity.z).limit_length(max_speed)
 	velocity.x = capped.x
 	velocity.z = capped.y
@@ -267,7 +271,8 @@ func _record_wall_impact(before: Vector3) -> void:
 	var wall_normal := get_wall_normal()
 	var normal := Vector3(wall_normal.x, 0.0, wall_normal.z).normalized()
 	var into := -Vector3(before.x, 0.0, before.z).dot(normal)
-	if into > 0.01 and (_wall_retain <= 0.0 or into > _wall_impact):
+	var new_wall := normal.dot(_wall_normal) <= 0.7 and into > wall_kick_speed
+	if into > 0.01 and (_wall_retain <= 0.0 or into > _wall_impact or new_wall):
 		_wall_normal = normal
 		_wall_impact = into
 		_wall_retain = wall_retain_time
@@ -285,8 +290,10 @@ func _find_wall() -> Vector3:
 		var travel := hit.get_travel().length()
 		for c in hit.get_collision_count():
 			var normal := hit.get_normal(c)
-			if absf(normal.y) < cos(floor_max_angle) and travel < best_travel:
-				best_travel = travel
+			# In a corner, prefer the wall Hei just hit so its speed comes back out.
+			var score := travel - (1.0 if _wall_retain > 0.0 and normal.dot(_wall_normal) > 0.7 else 0.0)
+			if absf(normal.y) < cos(floor_max_angle) and score < best_travel:
+				best_travel = score
 				best = Vector3(normal.x, 0.0, normal.z).normalized()
 	return best
 
@@ -301,6 +308,7 @@ func _try_wall_kick() -> bool:
 	var impact := _wall_impact if _wall_retain > 0.0 and normal.dot(_wall_normal) > 0.7 else 0.0
 	var horizontal := Vector3(velocity.x, 0.0, velocity.z)
 	var away := horizontal.dot(normal)
+	impact = maxf(impact, -away) # an early press has not touched the wall yet
 	var out := horizontal - normal * away + normal * maxf(maxf(impact, wall_kick_speed), away)
 	velocity.x = out.x
 	velocity.z = out.z
@@ -444,7 +452,8 @@ func _dash_velocity(direction: Vector3, amount: float, full_add: bool) -> Vector
 	return Vector3(horizontal.x, rise, horizontal.z)
 
 
-func _land_wavedash() -> void:
+## Returns true if a saved jump launched a hyper on contact.
+func _land_wavedash() -> bool:
 	_wave_window = 0.0
 	dash_available = true
 	var flat := Vector3(_dash_dir.x, 0.0, _dash_dir.z)
@@ -456,7 +465,8 @@ func _land_wavedash() -> void:
 				_wave_jump = false
 				_wave_slide = true
 				_launch(&"hyper")
-			return
+				return true
+			return false
 		horizontal += _move.normalized() * dash_speed * sqrt(0.5)
 	velocity = horizontal * slide_mult
 	_enter_slide(true)
@@ -464,6 +474,8 @@ func _land_wavedash() -> void:
 	if _wave_jump:
 		_wave_jump = false
 		_launch(&"hyper")
+		return true
+	return false
 
 
 func _enter_slide(can_hyper: bool) -> void:
@@ -515,8 +527,9 @@ func _try_jump() -> bool:
 
 
 func _launch(kind: StringName) -> void:
-	var from_wave := kind == &"hyper" and _wave_slide
+	var from_wave := kind == &"hyper" and (_wave_slide or (_coyote_wave and not is_on_floor()))
 	_wave_slide = false
+	_coyote_wave = false
 	_dash_limit = dash_limit
 	if kind == &"hyper":
 		_dash_limit = wave_dash_limit if from_wave else hyper_dash_limit

@@ -1,15 +1,7 @@
-[gd_scene load_steps=7 format=3]
+[gd_scene format=3 uid="uid://3x6o8f0ptgwp"]
 
 [ext_resource type="PackedScene" path="res://player/player.tscn" id="1_player"]
-[ext_resource type="Shader" path="res://levels/grid.gdshader" id="2_grid"]
-
-[sub_resource type="ShaderMaterial" id="ShaderMaterial_ground"]
-shader = ExtResource("2_grid")
-
-[sub_resource type="ShaderMaterial" id="ShaderMaterial_block"]
-shader = ExtResource("2_grid")
-shader_parameter/color_a = Color(0.72, 0.62, 0.45, 1)
-shader_parameter/color_b = Color(0.62, 0.52, 0.37, 1)
+[ext_resource type="Shader" uid="uid://dkjm10dkkxi1g" path="res://levels/grid.gdshader" id="2_grid"]
 
 [sub_resource type="ProceduralSkyMaterial" id="ProceduralSkyMaterial_sky"]
 sky_top_color = Color(0.45, 0.68, 0.85, 1)
@@ -26,100 +18,114 @@ sky = SubResource("Sky_main")
 ambient_light_source = 3
 tonemap_mode = 2
 
-[node name="TestLevel" type="Node3D"]
+[sub_resource type="ShaderMaterial" id="ShaderMaterial_ground"]
+render_priority = 0
+shader = ExtResource("2_grid")
+shader_parameter/color_a = Color(0.32, 0.4, 0.36, 1)
+shader_parameter/color_b = Color(0.26, 0.33, 0.3, 1)
+shader_parameter/cell_size = 2.0
 
-[node name="WorldEnvironment" type="WorldEnvironment" parent="."]
+[sub_resource type="ShaderMaterial" id="ShaderMaterial_block"]
+render_priority = 0
+shader = ExtResource("2_grid")
+shader_parameter/color_a = Color(0.72, 0.62, 0.45, 1)
+shader_parameter/color_b = Color(0.62, 0.52, 0.37, 1)
+shader_parameter/cell_size = 2.0
+
+[node name="TestLevel" type="Node3D" unique_id=422479552]
+
+[node name="WorldEnvironment" type="WorldEnvironment" parent="." unique_id=1136522975]
 environment = SubResource("Environment_main")
 
-[node name="Sun" type="DirectionalLight3D" parent="."]
+[node name="Sun" type="DirectionalLight3D" parent="." unique_id=1283011191]
 transform = Transform3D(0.8, 0.36, -0.48, 0, 0.8, 0.6, 0.6, -0.48, 0.64, 0, 30, 0)
 shadow_enabled = true
 directional_shadow_max_distance = 200.0
 
-[node name="Player" parent="." instance=ExtResource("1_player")]
+[node name="Player" parent="." unique_id=547529506 instance=ExtResource("1_player")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.1, 0)
 
-[node name="Geometry" type="Node3D" parent="."]
+[node name="Geometry" type="Node3D" parent="." unique_id=1823879625]
 
-[node name="Runway" type="CSGBox3D" parent="Geometry"]
+[node name="Runway" type="CSGBox3D" parent="Geometry" unique_id=960550781]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -1, -70)
 use_collision = true
 size = Vector3(16, 2, 150)
 material = SubResource("ShaderMaterial_ground")
 
-[node name="GapLink" type="CSGBox3D" parent="Geometry"]
+[node name="GapLink" type="CSGBox3D" parent="Geometry" unique_id=1740461329]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 16, -1, -5)
 use_collision = true
 size = Vector3(16, 2, 20)
 material = SubResource("ShaderMaterial_ground")
 
-[node name="GapA" type="CSGBox3D" parent="Geometry"]
+[node name="GapA" type="CSGBox3D" parent="Geometry" unique_id=352588567]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 30, -1, -12.5)
 use_collision = true
 size = Vector3(12, 2, 35)
 material = SubResource("ShaderMaterial_ground")
 
-[node name="GapB_8m" type="CSGBox3D" parent="Geometry"]
+[node name="GapB_8m" type="CSGBox3D" parent="Geometry" unique_id=1344274814]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 30, -1, -49)
 use_collision = true
 size = Vector3(12, 2, 22)
 material = SubResource("ShaderMaterial_block")
 
-[node name="GapC_15m" type="CSGBox3D" parent="Geometry"]
+[node name="GapC_15m" type="CSGBox3D" parent="Geometry" unique_id=1713531302]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 30, -1, -85)
 use_collision = true
 size = Vector3(12, 2, 20)
 material = SubResource("ShaderMaterial_block")
 
-[node name="GapD_25m" type="CSGBox3D" parent="Geometry"]
+[node name="GapD_25m" type="CSGBox3D" parent="Geometry" unique_id=1150279623]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 30, -1, -132.5)
 use_collision = true
 size = Vector3(12, 2, 25)
 material = SubResource("ShaderMaterial_block")
 
-[node name="LedgeLink" type="CSGBox3D" parent="Geometry"]
+[node name="LedgeLink" type="CSGBox3D" parent="Geometry" unique_id=126811356]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -16, -1, -5)
 use_collision = true
 size = Vector3(16, 2, 20)
 material = SubResource("ShaderMaterial_ground")
 
-[node name="LedgeFloor" type="CSGBox3D" parent="Geometry"]
+[node name="LedgeFloor" type="CSGBox3D" parent="Geometry" unique_id=1197372772]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -30, -1, -35)
 use_collision = true
 size = Vector3(12, 2, 80)
 material = SubResource("ShaderMaterial_ground")
 
-[node name="Ledge2m" type="CSGBox3D" parent="Geometry"]
+[node name="Ledge2m" type="CSGBox3D" parent="Geometry" unique_id=1412282571]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -30, 1, -20)
 use_collision = true
 size = Vector3(12, 2, 10)
 material = SubResource("ShaderMaterial_block")
 
-[node name="Ledge4m" type="CSGBox3D" parent="Geometry"]
+[node name="Ledge4m" type="CSGBox3D" parent="Geometry" unique_id=2099276694]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -30, 2, -38)
 use_collision = true
 size = Vector3(12, 4, 10)
 material = SubResource("ShaderMaterial_block")
 
-[node name="Ledge8m" type="CSGBox3D" parent="Geometry"]
+[node name="Ledge8m" type="CSGBox3D" parent="Geometry" unique_id=135291704]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -30, 4, -58)
 use_collision = true
 size = Vector3(12, 8, 10)
 material = SubResource("ShaderMaterial_block")
 
-[node name="Ramp20deg" type="CSGBox3D" parent="Geometry"]
+[node name="Ramp20deg" type="CSGBox3D" parent="Geometry" unique_id=1354456119]
 transform = Transform3D(1, 0, 0, 0, 0.93969, -0.34202, 0, 0.34202, 0.93969, 0, 3, -110)
 use_collision = true
 size = Vector3(10, 1, 20)
 material = SubResource("ShaderMaterial_block")
 
-[node name="LowCeiling" type="CSGBox3D" parent="Geometry"]
+[node name="LowCeiling" type="CSGBox3D" parent="Geometry" unique_id=761207848]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 4, -80)
 use_collision = true
 size = Vector3(8, 1, 10)
 material = SubResource("ShaderMaterial_block")
 
-[node name="EndWall" type="CSGBox3D" parent="Geometry"]
+[node name="EndWall" type="CSGBox3D" parent="Geometry" unique_id=863245278]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 5, -144.5)
 use_collision = true
 size = Vector3(16, 10, 1)

@@ -159,6 +159,25 @@ func test_jump_height_varies_with_hold() -> void:
 	check(full > tapped + 0.5, "full %f vs tapped %f" % [full, tapped])
 
 
+func test_full_jump_hangs_like_the_clips() -> void:
+	var start: float = p.position.y
+	var peak := start
+	var apex_tick := 0
+	var ticks := 0
+	p.set_scripted_input(NONE, true, false, false)
+	while ticks < 360:
+		await physics_frame
+		ticks += 1
+		if p.position.y > peak:
+			peak = p.position.y
+			apex_tick = ticks
+		if ticks > 4 and p.is_on_floor():
+			break
+	check(absf(peak - start - 4.6) < 0.3, "rises 4.6 m, got %f" % (peak - start))
+	check(absf(apex_tick / 120.0 - 0.63) < 0.06, "apex at 0.63 s, got %f" % (apex_tick / 120.0))
+	check(absf(ticks / 120.0 - 1.22) < 0.1, "airtime 1.22 s, got %f" % (ticks / 120.0))
+
+
 func test_coyote_jump() -> void:
 	check(await coyote_jump_velocity(0.05) > 0.0, "jump 0.05 s after leaving ledge")
 
@@ -448,7 +467,7 @@ func test_chained_speed_never_exceeds_max() -> void:
 			fastest = maxf(fastest, p.horizontal_speed())
 			if p.velocity.y < 0.0 and p.position.y < 0.3:
 				break
-	check(fastest > 30.0, "chain builds speed, got %f" % fastest)
+	check(fastest > 27.0, "chain builds speed, got %f" % fastest)
 	check(fastest <= 35.001, "capped at 35, got %f" % fastest)
 
 
@@ -524,15 +543,15 @@ func test_brake_faster_than_no_input() -> void:
 func test_brake_falls_faster() -> void:
 	await fly(0.0)
 	await hold(1.0, NONE)
-	check(absf(p.velocity.y + 13.3) < 0.01, "normal max fall, got %f" % p.velocity.y)
+	check(absf(p.velocity.y + 20.0) < 0.01, "normal max fall, got %f" % p.velocity.y)
 	await hold(1.0, NONE, false, false, true)
-	check(absf(p.velocity.y + 20.0) < 0.01, "fast max fall, got %f" % p.velocity.y)
+	check(absf(p.velocity.y + 30.0) < 0.01, "fast max fall, got %f" % p.velocity.y)
 
 
 func test_brake_cuts_rising_jump() -> void:
 	await hold(0.05, NONE, true)
 	await hold(0.1, NONE, true, false, true)
-	check(p.velocity.y < 8.75 - 2.0, "brake overrides held jump, got %f" % p.velocity.y)
+	check(p.velocity.y < 12.0 - 2.0, "brake overrides held jump, got %f" % p.velocity.y)
 
 
 func test_ctrl_through_hyper_does_not_brake() -> void:

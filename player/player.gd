@@ -16,13 +16,13 @@ enum State { NORMAL, DASH, DASH_RUN, SLIDE }
 @export var max_speed := 35.0
 
 @export_group("Gravity")
-@export var gravity := 75.0
-@export var max_fall := 13.3
-@export var fast_max_fall := 20.0
+@export var gravity := 36.0
+@export var max_fall := 20.0
+@export var fast_max_fall := 30.0
 @export var half_grav_threshold := 3.3
 
 @export_group("Jump")
-@export var jump_speed := 8.75
+@export var jump_speed := 12.0
 @export var jump_h_boost := 3.3
 @export var var_jump_time := 0.2
 
@@ -42,8 +42,8 @@ enum State { NORMAL, DASH, DASH_RUN, SLIDE }
 
 @export_group("Air")
 @export var air_turn_rate := 270.0
-@export var air_brake_decel := 90.0
-@export var air_brake_gravity_mult := 1.5
+@export var air_brake_decel := 150.0
+@export var air_brake_gravity_mult := 3.0
 
 @export_group("Forgiveness")
 @export var coyote_time := 0.1

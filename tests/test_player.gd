@@ -257,10 +257,11 @@ func test_space_held_aims_air_dash_up() -> void:
 
 func test_space_mid_dash_reaims_up() -> void:
 	await get_airborne()
+	var before: float = p.velocity.y
 	await hold(0.03, FORWARD, false, true)
-	check(p.velocity.y < 1.0, "starts flat, got %f" % p.velocity.y)
+	check(p.velocity.y <= before + 0.01, "starts flat, got %f" % p.velocity.y)
 	await hold(0.04, FORWARD, true, true) # lands after the 0.05 freeze
-	check(p.velocity.y > 12.0, "re-aimed up, got %f" % p.velocity.y)
+	check(p.velocity.y > before + 5.0, "re-aimed up, got %f" % p.velocity.y)
 
 
 func test_landing_with_shift_enters_dash_run_at_carried_speed() -> void:
@@ -791,3 +792,140 @@ func test_fov_uses_soft_speed() -> void:
 	await hold(0.5, NONE)
 	var camera: Camera3D = p.get_node("CameraRig/SpringArm3D/Camera3D")
 	check(camera.fov > 93.0, "full FOV at soft speed, got %f" % camera.fov)
+
+
+func test_sideways_dash_keeps_forward_speed() -> void:
+	await fly(25.0)
+	await hold(0.07, Vector2(1, 0), false, true)
+	check(absf(p.velocity.x - 20.0) < 0.5, "adds sideways, got %s" % p.velocity)
+	check(absf(p.velocity.z + 25.0) < 0.5, "keeps forward, got %s" % p.velocity)
+
+
+func test_backward_dash_subtracts() -> void:
+	await fly(25.0)
+	await hold(0.07, Vector2(0, -1), false, true)
+	check(absf(p.velocity.z + 5.0) < 0.5, "5 m/s forward, got %s" % p.velocity)
+
+
+func test_exact_cancel_dash_stays_finite() -> void: # Review Focus 1
+	await fly(20.0)
+	await hold(0.07, Vector2(0, -1), false, true)
+	check(p.velocity.is_finite(), "finite, got %s" % p.velocity)
+	check(p.horizontal_speed() < 0.5, "cancelled, got %f" % p.horizontal_speed())
+	await hold(0.2, NONE)
+	check(p.velocity.is_finite(), "stays finite, got %s" % p.velocity)
+
+
+func test_straight_up_dash_keeps_horizontal_speed() -> void:
+	await fly(25.0)
+	await hold(0.07, NONE, true, true)
+	check(absf(p.horizontal_speed() - 25.0) < 0.5, "keeps speed, got %f" % p.horizontal_speed())
+	check(p.velocity.y > 15.0, "rises, got %f" % p.velocity.y)
+
+
+func test_up_dash_rises_while_falling() -> void:
+	await fly(0.0)
+	await hold(0.6, NONE)
+	check(p.velocity.y < -10.0, "falling first, got %f" % p.velocity.y)
+	await hold(0.07, NONE, true, true)
+	check(absf(p.velocity.y - 18.0) < 0.1, "limited rise, got %f" % p.velocity.y)
+
+
+func test_down_dash_falls_while_rising() -> void:
+	await hold(0.05, NONE, true)
+	await hold(0.07, NONE, false, true, true)
+	check(absf(p.velocity.y + 20.0) < 0.5, "falls, got %f" % p.velocity.y)
+
+
+func test_flat_dash_keeps_vertical_speed() -> void:
+	await fly(10.0)
+	await hold(0.3, NONE)
+	var before: float = p.velocity.y
+	await hold(0.07, FORWARD, false, true)
+	check(absf(p.velocity.y - before) < 0.5, "%f vs %f" % [p.velocity.y, before])
+
+
+func test_dash_speed_survives_the_burst() -> void:
+	await fly(10.0)
+	await hold(0.25, FORWARD, false, true)
+	check(p.state != p.State.DASH, "burst over")
+	check(p.horizontal_speed() > 29.0, "no end trim, got %f" % p.horizontal_speed())
+
+
+func test_plain_dash_stops_adding_at_soft_limit() -> void:
+	await fly(30.0)
+	await hold(0.07, FORWARD, false, true)
+	check(absf(p.horizontal_speed() - 35.0) < 0.1, "got %f" % p.horizontal_speed())
+
+
+func test_dash_above_soft_limit_bends_and_keeps_speed() -> void:
+	await fly(50.0)
+	await hold(0.07, Vector2(1, 0), false, true)
+	check(absf(p.horizontal_speed() - 50.0) < 0.5, "keeps 50, got %f" % p.horizontal_speed())
+	check(p.velocity.x > 15.0, "path bends, got %s" % p.velocity)
+
+
+func test_hyper_can_pass_soft_limit() -> void:
+	p.velocity = Vector3(0, 0, -34)
+	await hold(0.06, FORWARD, false, true, true)
+	await hold(0.02, FORWARD, true, true, true)
+	check(p.horizontal_speed() > 38.0, "hyper passes 35, got %f" % p.horizontal_speed())
+
+
+func test_mashing_ground_dash_does_not_build_speed() -> void:
+	var fastest := 0.0
+	for press in 8:
+		await hold(0.03, FORWARD, false, true)
+		p.set_scripted_input(FORWARD, false, false, false)
+		for i in 30:
+			await physics_frame
+			fastest = maxf(fastest, p.horizontal_speed())
+	check(fastest <= 20.1, "mash stays at dash speed, got %f" % fastest)
+
+
+func test_dash_and_hop_loop_stays_at_soft_limit() -> void:
+	var fastest := 0.0
+	for hop in 6:
+		await hold(0.08, FORWARD, false, true)
+		fastest = maxf(fastest, p.horizontal_speed())
+		await hold(0.02, FORWARD, true, true)
+		await hold(0.15, FORWARD)
+		await hold(0.08, FORWARD, false, true)
+		fastest = maxf(fastest, p.horizontal_speed())
+		p.set_scripted_input(FORWARD, false, false, false)
+		for i in 240:
+			await physics_frame
+			fastest = maxf(fastest, p.horizontal_speed())
+			if i > 2 and p.is_on_floor():
+				break
+	check(fastest > 30.0, "loop is fast, got %f" % fastest)
+	check(fastest <= 35.001, "loop stays at 35, got %f" % fastest)
+
+
+func test_low_slide_multiplies_only_added_speed() -> void:
+	p.velocity = Vector3(0, 0, -5)
+	await hold(0.02, FORWARD, false, true, true)
+	check(absf(p.horizontal_speed() - 29.0) < 0.5, "5 + 20 * 1.2, got %f" % p.horizontal_speed())
+
+
+func test_straight_down_wavedash_adds_to_carried_speed() -> void:
+	await respawn(Vector3(0, 1.8, 0))
+	p.velocity = Vector3(0, 0, -10)
+	await hold(0.03, NONE, false, true, true)
+	p.set_scripted_input(FORWARD, false, false, true)
+	await land()
+	await hold(0.01, FORWARD, false, false, true)
+	check(p.state == p.State.SLIDE, "slides, state %d" % p.state)
+	check(p.horizontal_speed() > 26.0, "(10 + 14.1) * 1.2, got %f" % p.horizontal_speed())
+
+
+func test_fast_hyper_up_ramp_is_not_rise_limited() -> void: # Review Focus 3
+	await on_ramp(0.7)
+	await land()
+	await hold(0.1, NONE)
+	p.velocity = Vector3(0, 0, -34)
+	await hold(0.06, FORWARD, false, true, true)
+	await hold(0.02, FORWARD, true, true, true)
+	check(p.velocity.y > 18.0, "launch keeps slope rise, got %f" % p.velocity.y)
+	await hold(0.05, FORWARD, true, true, true)
+	check(not p.is_on_floor(), "left the ramp")

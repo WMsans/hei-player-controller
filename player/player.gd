@@ -33,7 +33,7 @@ enum State { NORMAL, DASH, DASH_RUN, SLIDE }
 @export var dash_speed := 20.0
 @export var dash_run_speed := 13.3
 @export var dash_time := 0.15
-@export var end_dash_up_mult := 0.75
+@export var max_rise := 18.0
 @export var hit_freeze_time := 0.05
 
 @export_group("Super")
@@ -87,7 +87,8 @@ var _dash_buffer := 0.0
 var _dash_cooldown := 0.0
 var _dash_timer := 0.0
 var _dash_dir := Vector3.FORWARD
-var _dash_keep := 0.0
+var _dash_base := Vector3.ZERO
+var _ground_dash_ready := true
 var _dash_grounded := false
 var _coyote_kind := &"jump"
 var _wave_window := 0.0
@@ -141,6 +142,7 @@ func _return_to_spawn() -> void:
 	_wave_window = 0.0
 	_wave_jump = false
 	_freeze = 0.0
+	_ground_dash_ready = true
 	reset_physics_interpolation()
 
 
@@ -175,6 +177,8 @@ func _physics_process(delta: float) -> void:
 		_wave_jump = true
 
 	var was_on_floor := is_on_floor()
+	if not was_on_floor:
+		_ground_dash_ready = true
 	if was_on_floor:
 		_coyote = coyote_time
 		if _wave_window > 0.0:
@@ -288,8 +292,13 @@ func _start_dash() -> void:
 	var grounded := is_on_floor()
 	var direction := dash_direction(_move, _jump_down, _squat_down)
 	var flat_direction := Vector3(direction.x, 0.0, direction.z).normalized()
-	var horizontal := Vector3(velocity.x, 0.0, velocity.z)
-	_dash_keep = maxf(horizontal.dot(flat_direction), 0.0)
+	_dash_base = velocity
+	if grounded:
+		_dash_base.y = 0.0
+	var ground_dash := grounded and direction.y <= 0.0
+	var full_add := _ground_dash_ready or not ground_dash
+	if ground_dash:
+		_ground_dash_ready = false
 	_dash_buffer = 0.0
 	_dash_cooldown = dash_cooldown
 	_var_jump = 0.0
@@ -298,8 +307,7 @@ func _start_dash() -> void:
 	is_air_braking = false
 
 	if grounded and direction.y < 0.0:
-		var slide_speed := maxf(dash_speed, _dash_keep) * slide_mult
-		velocity = flat_direction * slide_speed
+		velocity = _dash_velocity(flat_direction, dash_speed * slide_mult, full_add)
 		_enter_slide(true)
 		dash_started.emit(flat_direction if flat_direction != Vector3.ZERO else facing)
 		return
@@ -311,7 +319,7 @@ func _start_dash() -> void:
 	if not grounded and direction.y < 0.0:
 		_wave_window = dash_time + wavedash_grace
 
-	_set_dash_velocity(direction)
+	velocity = _dash_velocity(direction, dash_speed, full_add)
 	_dash_dir = direction
 	_dash_timer = dash_time
 	_dash_grounded = grounded and direction.y == 0.0
@@ -319,13 +327,22 @@ func _start_dash() -> void:
 	dash_started.emit(direction)
 
 
-## Dash speed along a direction, never slowing a body already moving faster.
-func _set_dash_velocity(direction: Vector3) -> void:
-	var flat_direction := Vector3(direction.x, 0.0, direction.z).normalized()
-	velocity = direction * dash_speed
-	if _dash_keep > Vector2(velocity.x, velocity.z).length():
-		velocity.x = flat_direction.x * _dash_keep
-		velocity.z = flat_direction.z * _dash_keep
+## Stored velocity plus the dash. Plain dashes never add past soft_speed.
+func _dash_velocity(direction: Vector3, amount: float, full_add: bool) -> Vector3:
+	var base := _dash_base
+	if base.y * direction.y < 0.0:
+		base.y = 0.0
+	var carried := Vector3(base.x, 0.0, base.z)
+	var flat := Vector3(direction.x, 0.0, direction.z)
+	var added := flat * amount
+	if not full_add:
+		var unit := flat.normalized()
+		added = unit * maxf(amount - carried.dot(unit), 0.0)
+	var horizontal := (carried + added).limit_length(maxf(soft_speed, carried.length()))
+	var rise := base.y + direction.y * amount
+	if direction.y > 0.0:
+		rise = minf(rise, maxf(max_rise, base.y))
+	return Vector3(horizontal.x, rise, horizontal.z)
 
 
 func _land_wavedash() -> void:
@@ -340,7 +357,7 @@ func _land_wavedash() -> void:
 				_wave_jump = false
 				_launch(&"hyper")
 			return
-		horizontal = _move.normalized() * dash_speed * sqrt(0.5)
+		horizontal += _move.normalized() * dash_speed * sqrt(0.5)
 	velocity = horizontal * slide_mult
 	_enter_slide(true)
 	if _wave_jump:
@@ -434,7 +451,7 @@ func _update_dash(delta: float) -> void:
 	if _jump_pressed and not _dash_grounded and not _squat_down and not is_on_floor():
 		var flat_direction := Vector3(_dash_dir.x, 0.0, _dash_dir.z)
 		_dash_dir = dash_direction(flat_direction, true, false)
-		_set_dash_velocity(_dash_dir)
+		velocity = _dash_velocity(_dash_dir, dash_speed, true)
 		_jump_buffer = 0.0
 	var hit_wall := is_on_wall() and get_wall_normal().dot(_dash_dir) < -0.5
 	var hit_ceiling := is_on_ceiling() and _dash_dir.y > 0.0
@@ -443,12 +460,6 @@ func _update_dash(delta: float) -> void:
 
 
 func _end_dash() -> void:
-	var horizontal := Vector3(velocity.x, 0.0, velocity.z)
-	horizontal = horizontal.limit_length(maxf(dash_run_speed, _dash_keep))
-	velocity.x = horizontal.x
-	velocity.z = horizontal.z
-	if _dash_dir.y > 0.0:
-		velocity.y = minf(velocity.y, _dash_dir.y * dash_run_speed * end_dash_up_mult)
 	state = State.NORMAL
 
 

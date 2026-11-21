@@ -1133,3 +1133,13 @@ func test_return_to_spawn_clears_wall_state() -> void: # Review Focus 5
 	await hold(0.01, NONE)
 	check(p._wall_lock == 0.0, "lock cleared, got %f" % p._wall_lock)
 	check(p._wall_retain == 0.0, "impact cleared, got %f" % p._wall_retain)
+
+
+func test_level_has_wall_kick_course() -> void:
+	var level: Node = load("res://levels/test_level.tscn").instantiate()
+	for node_name in ["KickFloor", "KickWallL", "KickWallR", "KickPillarA", "KickPillarB", "KickPillarC"]:
+		var box := level.get_node_or_null("Geometry/" + node_name) as CSGBox3D
+		check(box != null, "%s exists" % node_name)
+		if box:
+			check(box.use_collision, "%s collides" % node_name)
+	level.free()

@@ -29,8 +29,14 @@ func _unhandled_input(event: InputEvent) -> void:
 	elif event is InputEventMouseButton and event.pressed:
 		Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
 	elif event is InputEventMouseMotion and Input.mouse_mode == Input.MOUSE_MODE_CAPTURED:
-		_player.view_yaw = wrapf(_player.view_yaw - event.relative.x * mouse_sensitivity, -PI, PI)
-		_pitch = clampf(_pitch - event.relative.y * mouse_sensitivity, min_pitch, max_pitch)
+		apply_look(event)
+
+
+## Uses screen motion so sensitivity does not change with window size.
+func apply_look(motion: InputEventMouseMotion) -> void:
+	var look := motion.screen_relative * mouse_sensitivity
+	_player.view_yaw = wrapf(_player.view_yaw - look.x, -PI, PI)
+	_pitch = clampf(_pitch - look.y, min_pitch, max_pitch)
 
 
 func _process(delta: float) -> void:

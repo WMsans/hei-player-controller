@@ -607,3 +607,100 @@ func test_spent_dash_changes_capsule_color() -> void:
 	await hold(0.1, FORWARD, false, true)
 	var spent_color: Color = mesh.get_surface_override_material(0).albedo_color
 	check(not ready_color.is_equal_approx(spent_color), "color changes when dash is spent")
+
+
+func on_ramp(height_above_center: float) -> void:
+	add_box(Vector3(0, 5, 0), Vector3(80, 1, 80), deg_to_rad(20.0))
+	await respawn(Vector3(0, 5 + height_above_center, 0))
+
+
+func test_hyper_launches_off_uphill_slope() -> void:
+	await on_ramp(0.7)
+	await land()
+	await hold(0.1, NONE)
+	await hold(0.1, FORWARD, false, true, true)
+	await hold(0.02, FORWARD, true, true, true)
+	await hold(0.1, FORWARD, true, true, true)
+	check(not p.is_on_floor(), "left the ramp")
+	check(p.horizontal_speed() > 24.0, "kept hyper speed, got %f" % p.horizontal_speed())
+
+
+func test_fresh_ctrl_during_flat_air_dash_brakes() -> void:
+	await fly(0.0)
+	await hold(0.1, FORWARD, false, true)
+	await hold(0.2, FORWARD, false, false, true)
+	check(p.state != p.State.DASH, "burst over")
+	check(p.is_air_braking, "Ctrl pressed mid-dash brakes after it")
+
+
+func test_early_space_on_straight_down_dash_fires_hyper() -> void:
+	await respawn(Vector3(0, 1.8, 0))
+	var kinds := record_jumps()
+	await hold(0.02, NONE, false, true, true)
+	await hold(0.06, NONE, true, true, true)
+	p.set_scripted_input(NONE, true, false, true)
+	await land()
+	await hold(0.02, NONE, true, false, true)
+	check(kinds == [&"hyper"], "hyper on landing, got %s" % [kinds])
+
+
+func test_ground_burst_off_ledge_gets_no_free_up_dash() -> void:
+	add_box(Vector3(0, 4, 0), Vector3(10, 2, 10))
+	await respawn(Vector3(0, 5.02, -4.8))
+	p.set_scripted_input(FORWARD, false, true, false)
+	for i in 120:
+		await physics_frame
+		if not p.is_on_floor():
+			break
+	await hold(0.105, FORWARD, false, true)
+	check(p.state == p.State.DASH, "still in burst")
+	await hold(0.02, FORWARD, true, true)
+	check(p.velocity.y < 1.0, "Space does not re-aim, got %f" % p.velocity.y)
+
+
+func test_reaim_keeps_carried_speed() -> void:
+	await fly(32.0)
+	await hold(0.08, FORWARD, false, true)
+	await hold(0.02, FORWARD, true, true)
+	check(p.velocity.y > 12.0, "re-aimed up, got %f" % p.velocity.y)
+	check(p.horizontal_speed() > 31.5, "kept speed, got %f" % p.horizontal_speed())
+
+
+func test_flat_air_dash_into_ramp_can_super() -> void:
+	await on_ramp(1.0)
+	var kinds := record_jumps()
+	p.set_scripted_input(FORWARD, false, true, false)
+	for i in 60:
+		await physics_frame
+		if p.is_on_floor():
+			break
+	check(p.state == p.State.DASH, "contact during burst")
+	await hold(0.02, FORWARD, true, true)
+	check(kinds == [&"super"], "super on contact, got %s" % [kinds])
+
+
+func test_falling_out_returns_to_spawn() -> void:
+	var spawn_point: Vector3 = p.position
+	p.position = Vector3(50, -100, 50)
+	p.velocity = Vector3(5, -13, 5)
+	await hold(0.05, NONE)
+	check(p.position.distance_to(spawn_point) < 0.5, "back at spawn, got %s" % p.position)
+	check(p.velocity.length() < 2.0, "velocity cleared, got %s" % p.velocity)
+
+
+func test_mouse_look_ignores_window_scale() -> void:
+	var rig: Node = p.get_node("CameraRig")
+	var motion := InputEventMouseMotion.new()
+	motion.relative = Vector2(50, 0)
+	motion.screen_relative = Vector2(100, 0)
+	rig.apply_look(motion)
+	check(absf(p.view_yaw + 0.25) < 0.0001, "uses screen motion, got %f" % p.view_yaw)
+
+
+func test_forgiveness_timers_are_tunable() -> void:
+	var exported := []
+	for property in p.get_property_list():
+		if property.usage & PROPERTY_USAGE_EDITOR:
+			exported.append(property.name)
+	for name in ["coyote_time", "jump_buffer_time", "dash_buffer_time", "dash_cooldown", "wavedash_grace", "hyper_rest_grace"]:
+		check(name in exported, "%s is exported" % name)

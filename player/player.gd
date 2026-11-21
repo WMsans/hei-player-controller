@@ -8,13 +8,6 @@ signal dash_started(direction: Vector3)
 
 enum State { NORMAL, DASH, DASH_RUN, SLIDE }
 
-const COYOTE_TIME := 0.1
-const JUMP_BUFFER_TIME := 0.1
-const DASH_BUFFER_TIME := 0.08
-const DASH_COOLDOWN := 0.2
-const WAVEDASH_GRACE := 0.1
-const HYPER_REST_GRACE := 0.15
-
 @export_group("Run")
 @export var max_run := 7.5
 @export var run_accel := 83.0
@@ -51,6 +44,17 @@ const HYPER_REST_GRACE := 0.15
 @export var air_turn_rate := 270.0
 @export var air_brake_decel := 90.0
 @export var air_brake_gravity_mult := 1.5
+
+@export_group("Forgiveness")
+@export var coyote_time := 0.1
+@export var jump_buffer_time := 0.1
+@export var dash_buffer_time := 0.08
+@export var dash_cooldown := 0.2
+@export var wavedash_grace := 0.1
+@export var hyper_rest_grace := 0.15
+
+@export_group("Level")
+@export var kill_y := -30.0
 
 var state := State.NORMAL
 var facing := Vector3.FORWARD
@@ -89,6 +93,7 @@ var _can_hyper := false
 var _hyper_rest := 0.0
 var _brake_armed := false
 var _freeze := 0.0
+var _spawn_point := Vector3.ZERO
 var _pending_jump := false
 var _pending_dash := false
 var _pending_squat := false
@@ -115,6 +120,27 @@ func horizontal_speed() -> float:
 	return Vector2(velocity.x, velocity.z).length()
 
 
+func _ready() -> void:
+	_spawn_point = global_position
+
+
+func _return_to_spawn() -> void:
+	global_position = _spawn_point
+	velocity = Vector3.ZERO
+	state = State.NORMAL
+	dash_available = true
+	is_air_braking = false
+	_brake_armed = false
+	_coyote = 0.0
+	_jump_buffer = 0.0
+	_dash_buffer = 0.0
+	_var_jump = 0.0
+	_wave_window = 0.0
+	_wave_jump = false
+	_freeze = 0.0
+	reset_physics_interpolation()
+
+
 func _physics_process(delta: float) -> void:
 	_sample_input()
 	if _freeze > 0.0:
@@ -136,9 +162,9 @@ func _physics_process(delta: float) -> void:
 	_dash_buffer = maxf(_dash_buffer - delta, 0.0)
 	_dash_cooldown = maxf(_dash_cooldown - delta, 0.0)
 	if _jump_pressed:
-		_jump_buffer = JUMP_BUFFER_TIME
+		_jump_buffer = jump_buffer_time
 	if _dash_pressed:
-		_dash_buffer = DASH_BUFFER_TIME
+		_dash_buffer = dash_buffer_time
 	_wave_window = maxf(_wave_window - delta, 0.0)
 	if _wave_window <= 0.0:
 		_wave_jump = false
@@ -147,7 +173,7 @@ func _physics_process(delta: float) -> void:
 
 	var was_on_floor := is_on_floor()
 	if was_on_floor:
-		_coyote = COYOTE_TIME
+		_coyote = coyote_time
 		if _wave_window > 0.0:
 			_land_wavedash()
 		if state != State.DASH:
@@ -159,11 +185,11 @@ func _physics_process(delta: float) -> void:
 			return
 
 	# The brake needs a fresh Ctrl press in the air, so held Ctrl never cuts a hyper.
-	if was_on_floor or not _squat_down or state == State.DASH:
+	if was_on_floor or not _squat_down or (state == State.DASH and _dash_dir.y < 0.0):
 		_brake_armed = false
 	elif _squat_pressed:
 		_brake_armed = true
-	is_air_braking = _brake_armed
+	is_air_braking = _brake_armed and state != State.DASH
 
 	match state:
 		State.DASH:
@@ -187,6 +213,8 @@ func _physics_process(delta: float) -> void:
 		_var_jump = 0.0
 	if is_on_floor() and not was_on_floor:
 		landed.emit(fall_speed)
+	if global_position.y < kill_y:
+		_return_to_spawn()
 
 
 func _sample_input() -> void:
@@ -251,7 +279,7 @@ func _start_dash() -> void:
 	var horizontal := Vector3(velocity.x, 0.0, velocity.z)
 	_dash_keep = maxf(horizontal.dot(flat_direction), 0.0)
 	_dash_buffer = 0.0
-	_dash_cooldown = DASH_COOLDOWN
+	_dash_cooldown = dash_cooldown
 	_var_jump = 0.0
 	_freeze = hit_freeze_time
 	_brake_armed = false
@@ -269,18 +297,23 @@ func _start_dash() -> void:
 		_coyote = 0.0
 		_jump_buffer = 0.0
 	if not grounded and direction.y < 0.0:
-		_wave_window = dash_time + WAVEDASH_GRACE
+		_wave_window = dash_time + wavedash_grace
 
-	velocity = direction * dash_speed
-	if _dash_keep > Vector2(velocity.x, velocity.z).length():
-		velocity.x = flat_direction.x * _dash_keep
-		velocity.z = flat_direction.z * _dash_keep
-
+	_set_dash_velocity(direction)
 	_dash_dir = direction
 	_dash_timer = dash_time
 	_dash_grounded = grounded and direction.y == 0.0
 	state = State.DASH
 	dash_started.emit(direction)
+
+
+## Dash speed along a direction, never slowing a body already moving faster.
+func _set_dash_velocity(direction: Vector3) -> void:
+	var flat_direction := Vector3(direction.x, 0.0, direction.z).normalized()
+	velocity = direction * dash_speed
+	if _dash_keep > Vector2(velocity.x, velocity.z).length():
+		velocity.x = flat_direction.x * _dash_keep
+		velocity.z = flat_direction.z * _dash_keep
 
 
 func _land_wavedash() -> void:
@@ -290,8 +323,10 @@ func _land_wavedash() -> void:
 	var horizontal := Vector3(velocity.x, 0.0, velocity.z)
 	if flat == Vector3.ZERO:
 		if _move == Vector3.ZERO:
-			_wave_jump = false
 			state = State.NORMAL
+			if _wave_jump:
+				_wave_jump = false
+				_launch(&"hyper")
 			return
 		horizontal = _move.normalized() * dash_speed * sqrt(0.5)
 	velocity = horizontal * slide_mult
@@ -304,7 +339,7 @@ func _land_wavedash() -> void:
 func _enter_slide(can_hyper: bool) -> void:
 	state = State.SLIDE
 	_can_hyper = can_hyper
-	_hyper_rest = HYPER_REST_GRACE
+	_hyper_rest = hyper_rest_grace
 
 
 func _update_slide(delta: float) -> void:
@@ -363,7 +398,12 @@ func _launch(kind: StringName) -> void:
 	if kind == &"hyper":
 		speed *= hyper_h_mult
 		rise *= hyper_v_mult
-	velocity = direction * minf(speed, max_speed)
+	speed = minf(speed, max_speed)
+	if is_on_floor():
+		# Uphill, the launch must out-climb the slope or the floor swallows it.
+		var normal := get_floor_normal()
+		rise += maxf(-direction.dot(normal) / normal.y * speed, 0.0)
+	velocity = direction * speed
 	velocity.y = rise
 	_jump_buffer = 0.0
 	_coyote = 0.0
@@ -374,12 +414,15 @@ func _launch(kind: StringName) -> void:
 
 func _update_dash(delta: float) -> void:
 	_dash_timer -= delta
+	if is_on_floor() and _dash_dir.y == 0.0 and not _dash_grounded:
+		_dash_grounded = true # a flat air dash that meets rising ground has landed
+		dash_available = true
 	if _dash_grounded and _try_jump():
 		return
-	if _jump_pressed and not _squat_down and not is_on_floor():
+	if _jump_pressed and not _dash_grounded and not _squat_down and not is_on_floor():
 		var flat_direction := Vector3(_dash_dir.x, 0.0, _dash_dir.z)
 		_dash_dir = dash_direction(flat_direction, true, false)
-		velocity = _dash_dir * velocity.length()
+		_set_dash_velocity(_dash_dir)
 		_jump_buffer = 0.0
 	var hit_wall := is_on_wall() and get_wall_normal().dot(_dash_dir) < -0.5
 	var hit_ceiling := is_on_ceiling() and _dash_dir.y > 0.0

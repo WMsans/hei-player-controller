@@ -477,3 +477,92 @@ func test_wavedash_on_slope_keeps_speed() -> void: # Review Focus 4
 	check(p.state == p.State.SLIDE, "slides on slope, state %d" % p.state)
 	check(p.is_on_floor(), "stays on slope")
 	check(p.horizontal_speed() > 10.0, "keeps speed, got %f" % p.horizontal_speed())
+
+
+## Places Hei high in the air moving forward at `speed`, with no input.
+func fly(speed: float) -> void:
+	await respawn(Vector3(0, 60, 0))
+	p.velocity = Vector3(0, 0, -speed)
+
+
+func test_air_steer_keeps_speed() -> void:
+	await fly(21.7)
+	await hold(0.3, Vector2(1, 0))
+	check(p.velocity.x > 10.0, "turned toward input, got %s" % p.velocity)
+	check(p.horizontal_speed() > 14.5, "kept speed, got %f" % p.horizontal_speed())
+
+
+func test_no_input_keeps_air_momentum() -> void:
+	await fly(21.7)
+	await hold(0.2, NONE)
+	check(p.horizontal_speed() > 17.0, "momentum kept, got %f" % p.horizontal_speed())
+
+
+func test_opposite_input_brakes() -> void:
+	await fly(21.7)
+	await hold(0.1, Vector2(0, -1))
+	check(p.horizontal_speed() < 17.5, "brakes, got %f" % p.horizontal_speed())
+	check(p.velocity.z < 0.0, "does not rotate around")
+
+
+func test_brake_stops_quickly() -> void:
+	await fly(27.0)
+	await hold(0.35, NONE, false, false, true)
+	check(p.is_air_braking, "braking")
+	check(p.horizontal_speed() < 0.1, "stopped, got %f" % p.horizontal_speed())
+
+
+func test_brake_faster_than_no_input() -> void:
+	await fly(27.0)
+	await hold(0.15, NONE)
+	var coasting: float = p.horizontal_speed()
+	await fly(27.0)
+	await hold(0.15, NONE, false, false, true)
+	check(p.horizontal_speed() < coasting - 8.0, "brake %f vs coast %f" % [p.horizontal_speed(), coasting])
+
+
+func test_brake_falls_faster() -> void:
+	await fly(0.0)
+	await hold(1.0, NONE)
+	check(absf(p.velocity.y + 13.3) < 0.01, "normal max fall, got %f" % p.velocity.y)
+	await hold(1.0, NONE, false, false, true)
+	check(absf(p.velocity.y + 20.0) < 0.01, "fast max fall, got %f" % p.velocity.y)
+
+
+func test_brake_cuts_rising_jump() -> void:
+	await hold(0.05, NONE, true)
+	await hold(0.1, NONE, true, false, true)
+	check(p.velocity.y < 8.75 - 2.0, "brake overrides held jump, got %f" % p.velocity.y)
+
+
+func test_ctrl_through_hyper_does_not_brake() -> void:
+	await hold(0.08, FORWARD, false, true, true)
+	await hold(0.02, FORWARD, true, true, true)
+	await hold(0.08, FORWARD, true, true, true)
+	check(not p.is_on_floor(), "airborne")
+	check(not p.is_air_braking, "held Ctrl does not brake")
+	check(p.horizontal_speed() > 24.0, "kept hyper speed, got %f" % p.horizontal_speed())
+
+
+func test_ctrl_after_down_dash_needs_repress() -> void:
+	await respawn(Vector3(0, 60, 0))
+	await hold(0.25, FORWARD, false, true, true)
+	check(p.state == p.State.NORMAL, "burst over")
+	check(not p.is_air_braking, "Ctrl held through dash does not brake")
+	await hold(0.02, FORWARD, false, true, false)
+	await hold(0.02, FORWARD, false, true, true)
+	check(p.is_air_braking, "fresh press brakes")
+
+
+func test_brake_ignores_wasd() -> void:
+	await fly(0.0)
+	await hold(0.1, FORWARD, false, false, true)
+	check(p.horizontal_speed() < 0.01, "WASD adds nothing, got %f" % p.horizontal_speed())
+
+
+func test_brake_into_down_dash() -> void:
+	await fly(10.0)
+	await hold(0.05, FORWARD, false, false, true)
+	await hold(0.02, FORWARD, false, true, true)
+	check(p.state == p.State.DASH, "dashing")
+	check(p.velocity.y < -12.0, "dash aims down, got %f" % p.velocity.y)

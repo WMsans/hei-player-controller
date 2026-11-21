@@ -55,6 +55,7 @@ var state := State.NORMAL
 var facing := Vector3.FORWARD
 var view_yaw := 0.0
 var dash_available := true
+var is_air_braking := false
 
 var _scripted := false
 var _script_move := Vector2.ZERO
@@ -85,6 +86,7 @@ var _wave_window := 0.0
 var _wave_jump := false
 var _can_hyper := false
 var _hyper_rest := 0.0
+var _brake_armed := false
 
 
 ## Unit dash direction: WASD horizontal, Space up, Ctrl down, both cancel.
@@ -134,6 +136,13 @@ func _physics_process(delta: float) -> void:
 
 	if _dash_buffer > 0.0 and _dash_cooldown <= 0.0 and (was_on_floor or dash_available):
 		_start_dash()
+
+	# The brake needs a fresh Ctrl press in the air, so held Ctrl never cuts a hyper.
+	if was_on_floor or not _squat_down or state == State.DASH:
+		_brake_armed = false
+	elif _squat_pressed:
+		_brake_armed = true
+	is_air_braking = _brake_armed
 
 	match state:
 		State.DASH:
@@ -191,8 +200,27 @@ func _update_normal(delta: float) -> void:
 			_update_slide(delta)
 			return
 	_try_jump()
-	_apply_run(delta)
+	if is_on_floor() and _coyote > 0.0:
+		_apply_run(delta)
+	else:
+		_apply_air(delta)
 	_apply_gravity(delta)
+
+
+func _apply_air(delta: float) -> void:
+	var horizontal := Vector3(velocity.x, 0.0, velocity.z)
+	var speed := horizontal.length()
+	if is_air_braking:
+		horizontal = horizontal.move_toward(Vector3.ZERO, air_brake_decel * delta)
+	elif speed <= max_run:
+		horizontal = horizontal.move_toward(_move * max_run, run_accel * air_mult * delta)
+	elif _move != Vector3.ZERO and horizontal.normalized().dot(_move.normalized()) < -0.5:
+		horizontal = horizontal.move_toward(_move * max_run, run_accel * air_mult * delta)
+	else:
+		horizontal = _steer(horizontal, delta)
+		horizontal = horizontal.normalized() * move_toward(speed, max_run, run_reduce * air_mult * delta)
+	velocity.x = horizontal.x
+	velocity.z = horizontal.z
 
 
 func _start_dash() -> void:
@@ -381,15 +409,18 @@ func _steer(horizontal: Vector3, delta: float) -> Vector3:
 func _apply_run(delta: float) -> void:
 	var horizontal := Vector3(velocity.x, 0.0, velocity.z)
 	var target := _move * max_run
-	var mult := 1.0 if is_on_floor() else air_mult
 	var over_max := horizontal.length() > max_run and horizontal.dot(target) > 0.0
-	var rate := (run_reduce if over_max else run_accel) * mult
+	var rate := run_reduce if over_max else run_accel
 	horizontal = horizontal.move_toward(target, rate * delta)
 	velocity.x = horizontal.x
 	velocity.z = horizontal.z
 
 
 func _apply_gravity(delta: float) -> void:
+	if is_air_braking:
+		_var_jump = 0.0
+		velocity.y = move_toward(velocity.y, -fast_max_fall, gravity * air_brake_gravity_mult * delta)
+		return
 	if _var_jump > 0.0:
 		_var_jump -= delta
 		if _jump_down:

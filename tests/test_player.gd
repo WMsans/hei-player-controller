@@ -486,7 +486,7 @@ func test_chained_speed_never_exceeds_max() -> void:
 	await hold(0.08, FORWARD, false, true, true)
 	for chain in 12: # tap Space just before each landing so it buffers into the next hyper
 		await hold(0.02, FORWARD, true, true, true)
-		p.set_scripted_input(FORWARD, false, true, true)
+		p.set_scripted_input(FORWARD, false, false, true) # release, so the next tap is a real dash
 		for i in 240:
 			await physics_frame
 			fastest = maxf(fastest, p.horizontal_speed())
@@ -494,6 +494,34 @@ func test_chained_speed_never_exceeds_max() -> void:
 				break
 	check(fastest > 35.0, "chain passes the soft limit, got %f" % fastest)
 	check(fastest <= 60.001, "capped at 60, got %f" % fastest)
+
+
+func test_held_dash_hyper_chain_does_not_build_speed() -> void:
+	var kinds := record_jumps()
+	var limits: Array[float] = []
+	p.jumped.connect(func(_kind: StringName) -> void: limits.append(p._dash_limit))
+	await hold(0.08, FORWARD, false, true, true)
+	await hold(0.02, FORWARD, true, true, true)
+	var first: float = p.horizontal_speed()
+	var fastest := first
+	for hop in 5:
+		var launches := kinds.size()
+		p.set_scripted_input(FORWARD, false, true, true)
+		for i in 240:
+			await physics_frame
+			fastest = maxf(fastest, p.horizontal_speed())
+			if p.velocity.y < 0.0 and p.position.y < 0.3:
+				break
+		await hold(0.02, FORWARD, true, true, true)
+		p.set_scripted_input(FORWARD, false, true, true)
+		for i in 30: # the buffered Space fires on contact
+			if kinds.size() > launches:
+				break
+			await physics_frame
+		fastest = maxf(fastest, p.horizontal_speed())
+	check(kinds.count(&"hyper") >= 4, "chain kept firing hypers, got %s" % [kinds])
+	check(fastest <= first + 0.01, "one press multiplies once, %f then %f" % [first, fastest])
+	check(limits.slice(1).all(func(limit: float) -> bool: return limit == p.dash_limit), "held hops keep the plain dash limit, got %s" % [limits])
 
 
 func test_coyote_super_off_ledge() -> void: # Review Focus 3

@@ -109,6 +109,8 @@ stated elsewhere in this document. Harder routes now pay off:
   Speed already above the limit is kept, as before.
 - A hyper out of a wavedash launches `wave_hyper_mult` (1.2) times faster.
 - Air speed above `soft_speed` drains at `air_pull` (8 m/s²).
+- One real dash press pays for one multiplied hyper (user decided). A hyper chained
+  by holding dash launches at carried speed, with no multiplier and the plain dash limit.
 
 ### Speed limits (user decided)
 

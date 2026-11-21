@@ -107,6 +107,7 @@ var _ground_dash_ready := true
 var _dash_limit := 28.0
 var _wave_slide := false
 var _coyote_wave := false
+var _hyper_charged := false # one real dash pays for one multiplied hyper
 var _wall_normal := Vector3.ZERO
 var _wall_impact := 0.0
 var _wall_retain := 0.0
@@ -169,6 +170,7 @@ func _return_to_spawn() -> void:
 	_dash_limit = dash_limit
 	_wave_slide = false
 	_coyote_wave = false
+	_hyper_charged = false
 	_wall_impact = 0.0
 	_wall_retain = 0.0
 	_wall_lock = 0.0
@@ -318,6 +320,7 @@ func _try_wall_kick() -> bool:
 	dash_available = true
 	is_air_braking = false
 	_brake_armed = false
+	_hyper_charged = false
 	_jump_buffer = 0.0
 	_wave_window = 0.0
 	_wave_jump = false
@@ -398,6 +401,7 @@ func _start_dash() -> void:
 	var direction := dash_direction(_move, _jump_down, _squat_down)
 	var flat_direction := Vector3(direction.x, 0.0, direction.z).normalized()
 	_wave_slide = false
+	_hyper_charged = true
 	_dash_base = velocity
 	if grounded:
 		_dash_base.y = 0.0
@@ -527,11 +531,13 @@ func _try_jump() -> bool:
 
 
 func _launch(kind: StringName) -> void:
-	var from_wave := kind == &"hyper" and (_wave_slide or (_coyote_wave and not is_on_floor()))
+	var charged := kind == &"hyper" and _hyper_charged
+	var from_wave := charged and (_wave_slide or (_coyote_wave and not is_on_floor()))
+	_hyper_charged = false
 	_wave_slide = false
 	_coyote_wave = false
 	_dash_limit = dash_limit
-	if kind == &"hyper":
+	if charged:
 		_dash_limit = wave_dash_limit if from_wave else hyper_dash_limit
 	state = State.NORMAL
 	if kind == &"jump":
@@ -546,8 +552,9 @@ func _launch(kind: StringName) -> void:
 	var speed := maxf(horizontal.length(), super_jump_h)
 	var rise := jump_speed
 	if kind == &"hyper":
-		speed *= hyper_h_mult * (wave_hyper_mult if from_wave else 1.0)
 		rise *= hyper_v_mult
+	if charged:
+		speed *= hyper_h_mult * (wave_hyper_mult if from_wave else 1.0)
 	speed = minf(speed, max_speed)
 	if is_on_floor():
 		# Uphill, the launch must out-climb the slope or the floor swallows it.

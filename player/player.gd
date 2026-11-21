@@ -28,6 +28,10 @@ enum State { NORMAL, DASH, DASH_RUN, SLIDE }
 @export var jump_speed := 12.0
 @export var jump_h_boost := 3.3
 @export var var_jump_time := 0.2
+@export var tight_jump_speed := 15.0
+@export var tight_gravity := 70.0
+@export var hang_start_speed := 10.8
+@export var hang_full_speed := 21.7
 
 @export_group("Dash")
 @export var dash_speed := 20.0
@@ -526,15 +530,21 @@ func _apply_gravity(delta: float) -> void:
 		velocity.y = 0.0
 		return
 	var mult := 0.5 if absf(velocity.y) < half_grav_threshold and _jump_down else 1.0
-	velocity.y = move_toward(velocity.y, -max_fall, gravity * mult * delta)
+	velocity.y = move_toward(velocity.y, -max_fall, lerpf(tight_gravity, gravity, _hang()) * mult * delta)
+
+
+## 0 at walking speeds (tight jump), 1 at launch speeds (long hang).
+func _hang() -> float:
+	return smoothstep(hang_start_speed, hang_full_speed, horizontal_speed())
 
 
 func _jump() -> void:
+	var rise := lerpf(tight_jump_speed, jump_speed, _hang())
 	_jump_buffer = 0.0
 	_coyote = 0.0
 	_var_jump = var_jump_time
-	_var_jump_speed = jump_speed
+	_var_jump_speed = rise
 	var carried := Vector3(velocity.x, 0.0, velocity.z)
 	var boosted := (carried + _move * jump_h_boost).limit_length(maxf(carried.length(), max_run + jump_h_boost))
-	velocity = Vector3(boosted.x, jump_speed, boosted.z)
+	velocity = Vector3(boosted.x, rise, boosted.z)
 	jumped.emit(&"jump")

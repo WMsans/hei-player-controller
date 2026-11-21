@@ -139,6 +139,15 @@ apex, and 1.22 s of airtime. A tapped jump rises about 1.95 m.
 Because gravity drops, the air brake's gravity multiplier rises so squat still
 drops Hei hard.
 
+### Tight slow jumps (user decided at the Stage 1 play check)
+
+The long hang felt light and soft at low speed. Below `hang_start_speed`
+(10.8 m/s), jumps use `tight_gravity` 70 and `tight_jump_speed` 15, which keeps
+about the same height (4.7 m) with 0.46 s to apex and 0.88 s of airtime. Gravity
+and plain-jump force blend smoothly to the long-hang values (36 and 12) at
+`hang_full_speed` (21.7 m/s). Gravity follows current horizontal speed during
+flight. The air brake keeps using the long-hang `gravity` as its base.
+
 ### Stage 1 values
 
 | Export | Now | New |

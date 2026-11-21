@@ -159,7 +159,9 @@ func test_jump_height_varies_with_hold() -> void:
 	check(full > tapped + 0.5, "full %f vs tapped %f" % [full, tapped])
 
 
-func test_full_jump_hangs_like_the_clips() -> void:
+## Holds a full jump from the floor at `speed`, returns its rise, apex time, and airtime.
+func jump_arc(speed: float) -> Dictionary:
+	p.velocity = Vector3(0, 0, -speed)
 	var start: float = p.position.y
 	var peak := start
 	var apex_tick := 0
@@ -173,9 +175,31 @@ func test_full_jump_hangs_like_the_clips() -> void:
 			apex_tick = ticks
 		if ticks > 4 and p.is_on_floor():
 			break
-	check(absf(peak - start - 4.6) < 0.3, "rises 4.6 m, got %f" % (peak - start))
-	check(absf(apex_tick / 120.0 - 0.63) < 0.06, "apex at 0.63 s, got %f" % (apex_tick / 120.0))
-	check(absf(ticks / 120.0 - 1.22) < 0.1, "airtime 1.22 s, got %f" % (ticks / 120.0))
+	return {"rise": peak - start, "apex": apex_tick / 120.0, "air": ticks / 120.0}
+
+
+func test_full_jump_hangs_like_the_clips() -> void:
+	var arc: Dictionary = await jump_arc(25.0)
+	check(absf(arc.rise - 4.6) < 0.3, "rises 4.6 m, got %f" % arc.rise)
+	check(absf(arc.apex - 0.63) < 0.06, "apex at 0.63 s, got %f" % arc.apex)
+	check(absf(arc.air - 1.22) < 0.1, "airtime 1.22 s, got %f" % arc.air)
+
+
+func test_standing_jump_is_tight() -> void:
+	var arc: Dictionary = await jump_arc(0.0)
+	check(absf(arc.rise - 4.72) < 0.3, "rises 4.72 m, got %f" % arc.rise)
+	check(absf(arc.apex - 0.46) < 0.05, "apex at 0.46 s, got %f" % arc.apex)
+	check(absf(arc.air - 0.88) < 0.08, "airtime 0.88 s, got %f" % arc.air)
+
+
+func test_run_speed_jump_is_tight() -> void:
+	var arc: Dictionary = await jump_arc(7.5)
+	check(absf(arc.air - 0.88) < 0.08, "airtime 0.88 s, got %f" % arc.air)
+
+
+func test_mid_speed_jump_blends_toward_hang() -> void:
+	var arc: Dictionary = await jump_arc(16.0)
+	check(arc.air > 0.92 and arc.air < 1.18, "between tight and hang, got %f" % arc.air)
 
 
 func test_coyote_jump() -> void:

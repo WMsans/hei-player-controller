@@ -38,6 +38,7 @@ const HYPER_REST_GRACE := 0.15
 @export var dash_run_speed := 13.3
 @export var dash_time := 0.15
 @export var end_dash_up_mult := 0.75
+@export var hit_freeze_time := 0.05
 
 @export_group("Super")
 @export var super_jump_h := 21.7
@@ -87,6 +88,10 @@ var _wave_jump := false
 var _can_hyper := false
 var _hyper_rest := 0.0
 var _brake_armed := false
+var _freeze := 0.0
+var _pending_jump := false
+var _pending_dash := false
+var _pending_squat := false
 
 
 ## Unit dash direction: WASD horizontal, Space up, Ctrl down, both cancel.
@@ -112,6 +117,20 @@ func horizontal_speed() -> float:
 
 func _physics_process(delta: float) -> void:
 	_sample_input()
+	if _freeze > 0.0:
+		# Hit-freeze pauses the simulation but keeps presses for when it ends.
+		_freeze -= delta
+		_pending_jump = _pending_jump or _jump_pressed
+		_pending_dash = _pending_dash or _dash_pressed
+		_pending_squat = _pending_squat or _squat_pressed
+		return
+	_jump_pressed = _jump_pressed or _pending_jump
+	_dash_pressed = _dash_pressed or _pending_dash
+	_squat_pressed = _squat_pressed or _pending_squat
+	_pending_jump = false
+	_pending_dash = false
+	_pending_squat = false
+
 	_coyote = maxf(_coyote - delta, 0.0)
 	_jump_buffer = maxf(_jump_buffer - delta, 0.0)
 	_dash_buffer = maxf(_dash_buffer - delta, 0.0)
@@ -136,6 +155,8 @@ func _physics_process(delta: float) -> void:
 
 	if _dash_buffer > 0.0 and _dash_cooldown <= 0.0 and (was_on_floor or dash_available):
 		_start_dash()
+		if _freeze > 0.0:
+			return
 
 	# The brake needs a fresh Ctrl press in the air, so held Ctrl never cuts a hyper.
 	if was_on_floor or not _squat_down or state == State.DASH:
@@ -232,6 +253,9 @@ func _start_dash() -> void:
 	_dash_buffer = 0.0
 	_dash_cooldown = DASH_COOLDOWN
 	_var_jump = 0.0
+	_freeze = hit_freeze_time
+	_brake_armed = false
+	is_air_braking = false
 
 	if grounded and direction.y < 0.0:
 		var slide_speed := maxf(dash_speed, _dash_keep) * slide_mult

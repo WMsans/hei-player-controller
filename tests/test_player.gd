@@ -226,7 +226,7 @@ func test_landing_refills_air_dash() -> void:
 
 func test_held_shift_does_not_extend_air_dash() -> void:
 	await get_airborne()
-	await hold(0.2, FORWARD, false, true)
+	await hold(0.25, FORWARD, false, true) # 0.05 freeze + 0.15 burst + margin
 	check(p.state != p.State.DASH, "burst ended with Shift held")
 
 
@@ -240,7 +240,7 @@ func test_space_mid_dash_reaims_up() -> void:
 	await get_airborne()
 	await hold(0.03, FORWARD, false, true)
 	check(p.velocity.y < 1.0, "starts flat, got %f" % p.velocity.y)
-	await hold(0.02, FORWARD, true, true)
+	await hold(0.04, FORWARD, true, true) # lands after the 0.05 freeze
 	check(p.velocity.y > 12.0, "re-aimed up, got %f" % p.velocity.y)
 
 
@@ -296,7 +296,7 @@ func test_ground_shift_space_consumes_air_dash() -> void:
 
 func test_dash_into_wall_stops_cleanly() -> void: # Review Focus 1
 	var wall := add_box(Vector3(0, 5, -2), Vector3(20, 10, 1))
-	await hold(0.1, FORWARD, false, true)
+	await hold(0.15, FORWARD, false, true)
 	check(p.horizontal_speed() < 1.0, "stopped by wall, got %f" % p.horizontal_speed())
 	wall.queue_free()
 	await hold(0.1, NONE)
@@ -305,7 +305,7 @@ func test_dash_into_wall_stops_cleanly() -> void: # Review Focus 1
 
 func test_ceiling_cancels_up_dash() -> void: # Review Focus 2
 	add_box(Vector3(0, 3.5, 0), Vector3(20, 1, 20))
-	await hold(0.12, NONE, true, true)
+	await hold(0.2, NONE, true, true)
 	check(p.state != p.State.DASH, "dash ended at ceiling")
 	check(p.velocity.y <= 0.0, "falling, got %f" % p.velocity.y)
 
@@ -358,7 +358,7 @@ func test_super_exceeds_dash_run() -> void:
 
 func test_hyper_faster_than_super() -> void:
 	var kinds := record_jumps()
-	await hold(0.08, FORWARD, false, true, true)
+	await hold(0.12, FORWARD, false, true, true) # slide friction brings it under super speed
 	await hold(0.02, FORWARD, true, true, true)
 	check(kinds == [&"hyper"], "hyper fired, got %s" % [kinds])
 	check(absf(p.horizontal_speed() - 27.125) < 0.5, "at 27.1, got %f" % p.horizontal_speed())
@@ -566,3 +566,44 @@ func test_brake_into_down_dash() -> void:
 	await hold(0.02, FORWARD, false, true, true)
 	check(p.state == p.State.DASH, "dashing")
 	check(p.velocity.y < -12.0, "dash aims down, got %f" % p.velocity.y)
+
+
+func test_hit_freeze_holds_position_for_50ms() -> void:
+	var start: Vector3 = p.position
+	await hold(0.03, FORWARD, false, true)
+	check(p.position.distance_to(start) < 0.001, "frozen, moved %f" % p.position.distance_to(start))
+	await hold(0.06, FORWARD, false, true)
+	check(p.position.distance_to(start) > 0.2, "moves after freeze, moved %f" % p.position.distance_to(start))
+
+
+func test_space_during_freeze_is_not_lost() -> void:
+	var kinds := record_jumps()
+	await hold(0.02, FORWARD, false, true)
+	await hold(0.01, FORWARD, true, true)
+	await hold(0.08, FORWARD, false, true)
+	check(kinds == [&"super"], "super after freeze, got %s" % [kinds])
+
+
+func test_juice_stretches_visual_not_collider() -> void:
+	var visual: Node3D = p.get_node("Visual")
+	await hold(0.02, NONE, true)
+	check(visual.scale.y > 1.15, "stretched on jump, got %s" % visual.scale)
+	check(p.get_node("CollisionShape3D").scale == Vector3.ONE, "collider unscaled")
+	await hold(0.1, NONE)
+	await land()
+	await hold(0.02, NONE)
+	check(visual.scale.y < 1.0, "squashed on landing, got %s" % visual.scale)
+	check(p.get_node("CollisionShape3D").scale == Vector3.ONE, "collider unscaled")
+	await hold(0.6, NONE)
+	check(visual.scale.distance_to(Vector3.ONE) < 0.01, "recovers, got %s" % visual.scale)
+
+
+func test_spent_dash_changes_capsule_color() -> void:
+	var mesh: MeshInstance3D = p.get_node("Visual/Mesh")
+	await hold(0.02, NONE)
+	var ready_color: Color = mesh.get_surface_override_material(0).albedo_color
+	await respawn(Vector3(0, 30, 0))
+	mesh = p.get_node("Visual/Mesh")
+	await hold(0.1, FORWARD, false, true)
+	var spent_color: Color = mesh.get_surface_override_material(0).albedo_color
+	check(not ready_color.is_equal_approx(spent_color), "color changes when dash is spent")
